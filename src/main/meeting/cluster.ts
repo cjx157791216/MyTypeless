@@ -268,6 +268,7 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
     if (cl.length < k) cl = cutAt(-Infinity, n - k)
     cl.sort((x, y) => durOf(y) - durOf(x))
     const majors = cl.slice(0, k).map((ms) => [...ms])
+    const m = majors.length // 句子比参会人数少时（会议刚开始）簇数可能不到 k
     const fixed = new Set<number>() // 有约束标签的段不挪动
     for (const ms of majors) for (const i of ms) if (tag[i] !== null) fixed.add(i)
     let owner = new Array<number>(n).fill(-1)
@@ -279,7 +280,7 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
         if (fixed.has(i)) continue
         let best = owner[i]
         let bestSim = -Infinity
-        for (let j = 0; j < k; j++) {
+        for (let j = 0; j < m; j++) {
           const g = sums[j]
           const self = owner[i] === j
           const cnt = g.n - (self ? 1 : 0)
@@ -295,12 +296,12 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
         next[i] = best
       }
       // 不能把某个人的段全部拉走（选了几个人就保证分出几个人）：留下与自己这组最像、相对最像别组差得最多的一段
-      for (let j = 0; j < k; j++) {
+      for (let j = 0; j < m; j++) {
         if (next.includes(j)) continue
         let keep = -1
         let margin = -Infinity
         for (let i = 0; i < n; i++) {
-          if (owner[i] !== j || fixed.has(i)) continue
+          if (owner[i] !== j || fixed.has(i) || next[i] < 0) continue
           const g = sums[j]
           const own = g.n > 1 ? (dot(vecs[i], g.sum) - 1) / (g.n - 1) : 1
           const to = sums[next[i]]

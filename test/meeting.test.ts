@@ -205,6 +205,15 @@ test('整体归类：按参会人数合并；手动指定的段与命名过的�
   assert.equal(r2.assign.get(99), r2.assign.get(items.find((it) => it.speaker === 3)!.id), '没有声纹的短段跟随原说话人')
 })
 
+test('整体归类：会议刚开始、有声纹的句子比参会人数少时不报错，各句保持原归属', () => {
+  let next = 100
+  const items: ClusterItem[] = fourSpeakers.slice(0, 2).map((x, i) => ({ id: i, speaker: i + 1, v: x.v, durMs: 3000, locked: false }))
+  const r = regroup(items, { expected: 4, create: () => next++ })
+  for (const it of items) assert.equal(r.assign.get(it.id), it.speaker)
+  const one = regroup(items.slice(0, 1), { expected: 3, create: () => next++ })
+  assert.equal(one.assign.get(0), 1)
+})
+
 test('声纹认人（真人短句，原声/外放/跨通道）：用整组声音按自身一致度认，每组 3 句以上全部认出；不认错；没保存过的人不被认成别人', () => {
   const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
   const mean = (vs: number[][]) => {
