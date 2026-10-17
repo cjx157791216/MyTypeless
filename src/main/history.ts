@@ -132,6 +132,14 @@ function migrateColumns(): void {
   // 旧模型保存的声纹已无法认人，补列时一并删除（用户确认不保留），会议里对它们的引用清空
   const meetingCols = new Set((d.prepare(`PRAGMA table_info(meetings)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!meetingCols.has('embed_model')) d.exec(`ALTER TABLE meetings ADD COLUMN embed_model TEXT`)
+  // 线上会议的应用声音（D-033）：声音来源、应用声音的临时录音、线上人数；说话人与句子记下来自哪一路（0 = 麦克风 / 现场，1 = 应用 / 线上）
+  if (!meetingCols.has('source')) d.exec(`ALTER TABLE meetings ADD COLUMN source TEXT NOT NULL DEFAULT 'mic'`)
+  if (!meetingCols.has('app_audio_path')) d.exec(`ALTER TABLE meetings ADD COLUMN app_audio_path TEXT`)
+  if (!meetingCols.has('app_name')) d.exec(`ALTER TABLE meetings ADD COLUMN app_name TEXT`)
+  if (!meetingCols.has('expected_remote')) d.exec(`ALTER TABLE meetings ADD COLUMN expected_remote INTEGER`)
+  if (!segCols.has('track')) d.exec(`ALTER TABLE meeting_segments ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
+  const speakerCols = new Set((d.prepare(`PRAGMA table_info(meeting_speakers)`).all() as Array<{ name: string }>).map((c) => c.name))
+  if (!speakerCols.has('track')) d.exec(`ALTER TABLE meeting_speakers ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
   const printCols = new Set((d.prepare(`PRAGMA table_info(voiceprints)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!printCols.has('model')) {
     d.exec(`ALTER TABLE voiceprints ADD COLUMN model TEXT`)

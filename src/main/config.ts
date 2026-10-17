@@ -65,6 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   learnFrequentTerms: true,
   appMode: 'personal',
   meetingSpeakers: 2,
+  meetingSource: 'mic',
+  meetingApp: '',
+  meetingRemoteSpeakers: 2,
   autoCheckUpdates: true
 }
 

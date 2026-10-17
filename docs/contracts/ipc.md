@@ -29,11 +29,11 @@
 | `updateInstall` | `update.install()` | → `{ ok, error? }`：已下载时重启并安装；录音、会议或整理中拒绝 |
 | `updateOpenDownload` | `update.openDownload()` | 用浏览器打开新版本 DMG 地址（自动安装失败时手动安装） |
 | `historyStats` | `history.stats()` | → `HistoryStats { count, totalDurationMs, totalChars, weekCount, todayChars }`（首页概览；提问不计字数） |
-| `meetingStart` | `meeting.start(opts?)` | `MeetingStartOptions { title?, expectedSpeakers? }` → `{ ok, error?, meetingId? }`；听写进行中、已有会议或上一场还在整理时拒绝（D-015） |
+| `meetingStart` | `meeting.start(opts?)` | `MeetingStartOptions { title?, expectedSpeakers?, source?, appBundleId?, appName?, expectedRemote? }` → `{ ok, error?, meetingId? }`；`source` 为 `mic`（默认，只用麦克风）/ `mixed`（麦克风 + 应用声音）/ `app`（只用应用声音），`appBundleId` 空 = 全部系统声音，`expectedSpeakers` / `expectedRemote` 为现场 / 线上人数；未给的项用上次的设置；听写进行中、已有会议或上一场还在整理时拒绝（D-015）；用应用声音但系统低于 14.2、或「录制系统音频」授权框还没回应时拒绝（D-033） |
 | `meetingPause` / `meetingResume` / `meetingStop` | `meeting.pause/resume/stop(opts?)` | 暂停（关闭麦克风）/ 继续 / 结束并整理（重新归类说话人 →（`opts.minutes !== false` 时）生成纪要 → 删除临时录音）（D-019） |
 | `meetingRequestStop` | `meeting.requestStop()` | 浮动条用：主进程弹系统对话框「生成纪要 / 只保存记录 / 继续开会」 |
 | `meetingGetLive` | `meeting.getLive()` | → 当前 `MeetingLive` |
-| `meetingAudioChunk` | `meeting.pushAudio(buf)` | 浮动条 → 主进程：会议录音分片（16kHz 单声道 Int16，约 100ms）；暂停时忽略 |
+| `meetingAudioChunk` | `meeting.pushAudio(buf)` | 浮动条 → 主进程：会议麦克风录音分片（16kHz 单声道 Int16，约 100ms）；暂停时、只用应用声音时忽略 |
 | `meetingList` / `meetingGet` | `meeting.list()` / `meeting.get(id)` | → `MeetingSummary[]`（按开始时间倒序）/ `MeetingDetail \| null` |
 | `meetingDelete` | `meeting.remove(id)` | 删除会议的文字、说话人与残留的临时录音 → `boolean`（进行中或整理中返回 false） |
 | `meetingSetTitle` | `meeting.setTitle(id, title)` | 改会议主题 |
@@ -41,7 +41,9 @@
 | `meetingAssignSegment` | `meeting.assignSegment(id, segmentId, speakerId \| 'new')` | 把一句话改归某人或新说话人（标记为手动，整理时不再改动） |
 | `meetingMergeSpeakers` | `meeting.mergeSpeakers(id, from, into)` | 合并两个说话人 |
 | `meetingSaveMinutes` / `meetingRegenerate` | `meeting.saveMinutes(id, md)` / `meeting.regenerate(id)` | 保存编辑后的纪要 / 重新生成 → `{ ok, error? }` |
-| `meetingSetExpected` | `meeting.setExpected(id, n)` | 改参会人数（1～10）并立即按新人数重新区分说话人，同时记为下次开会的默认人数 → `{ ok, error? }`（较早没有逐句声纹的会议返回 false）（D-020、D-021） |
+| `meetingSetExpected` | `meeting.setExpected(id, n, track?)` | 改某一路（`track` 0 = 现场 / 麦克风，默认；1 = 线上 / 应用声音）的人数（1～10）并立即按新人数重新区分这一路的说话人，同时记为下次开会的默认人数 → `{ ok, error? }`（较早没有逐句声纹的会议返回 false）（D-020、D-021、D-033） |
+| `meetingAudioApps` | `meeting.audioApps()` | → `{ supported, apps: AudioApp[] }`：可截取声音的正在运行的应用（`{ bundleId, name, audio, output }`，常见会议软件在前）；`supported = false` 表示系统低于 macOS 14.2（D-033） |
+| `meetingPrepareAppAudio` | `meeting.prepareAppAudio()` | 开会前先完成「录制系统音频」授权 → `'ready' \| 'waiting' \| 'unsupported'`；`waiting` = 系统授权框还没回应（用户允许后 macOS 会退出并重新打开 MyTypeless，所以必须在开会前）（D-033） |
 | `meetingFinish` | `meeting.finish(id, opts?)` | 整理异常中断的会议：补转写临时录音尾部后照常整理 → `{ ok, error? }` |
 | `meetingExport` | `meeting.exportMarkdown(id)` | 保存对话框，写出纪要 + 完整记录的 Markdown → `boolean` |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |

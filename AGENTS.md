@@ -90,6 +90,7 @@ npm run docs:check
 - `electron-builder.yml` 的 `identity: null` 会让 electron-builder 完全跳过签名，由 `afterPack: scripts/sign-app.cjs` 补签：有本地证书（`scripts/setup-signing.sh`，存于 `.vendor/signing/`，`predist` 自动生成）就用证书签名，重新打包后系统授权仍有效；没有才退回 adhoc（每次打包都要重新授权）。不要删 `.vendor/signing/`，删了证书会变、所有授权失效。
 - 在线更新（D-028）按**版本号**判断新旧，不看构建号：发布前必须升级 `package.json` 的 `version`（`npm run release` 会拒绝不更大的版本）。自动安装要求新旧版本同一证书签名；应用不在「应用程序」文件夹（如直接从 DMG 运行）时 Squirrel 无法替换。开发运行不检查更新；测试用打包版 + `MT_UPDATE_URL=http://127.0.0.1:<端口>/latest` 指向本机临时服务器。
 - 从 adhoc 版本换到证书签名版本时，系统里旧的授权记录无效但开关显示为开：主窗口「重置授权」按钮会清除本应用的旧记录。
+- 线上会议截取应用声音（D-033，`mt-audiotap`）：用户在授权框点「允许」录制系统音频后，**macOS 会退出并重新打开所有 MyTypeless 实例**（包括隔离测试实例），所以授权必须在开会前完成（`prepareAppAudio` / `--probe`）；没授权时系统只给全零、不报错。Process tap 的 IOProc 不能交给 dispatch queue（会跳过 IO 周期，声音短约 0.3%，与麦克风时间线错位）；tap 报的格式是 48kHz，但数据按输出设备的实际采样率到来（MacBook 扬声器 44.1kHz），要按聚集设备的 `NominalSampleRate` 重采样。外放回声门槛 `ECHO_CORR` 用 `scripts/echo-sim.ts`（真人录音 + 模拟外放）重新标定，同时看“只有回声被去掉多少”和“戴耳机 / 同时说话时现场的话保留多少”。
 - 开发模式下辅助功能/麦克风权限归属于启动 `npm run dev` 的终端应用（iTerm、终端、VS Code…），给 MyTypeless 授权无效；主窗口状态面板会指出是哪个应用。
 
 ## 任务流程

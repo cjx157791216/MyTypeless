@@ -164,19 +164,30 @@
             <header class="page-head">
               <div>
                 <h1>会议</h1>
-                <p class="sub">录下线下会议，自动区分说话人，会后生成会议纪要</p>
+                <p class="sub">录下线下或线上会议，自动区分说话人，会后生成会议纪要</p>
               </div>
             </header>
             <div id="meeting-interrupted"></div>
             <div class="card start-card" id="meeting-start-card">
               <div class="start-row">
                 <input id="meeting-title" type="text" placeholder="会议主题（可选）" />
-                <select id="meeting-speakers" title="按参会人数区分说话人（会中、会后都能再改）"></select>
                 <button id="btn-meeting-start" class="btn primary">
                   <i class="rec-dot static"></i>开始会议
                 </button>
               </div>
-              <div class="hint">选好参会人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；录音只在本机临时保存，整理完自动删除。会议进行中 Fn 听写暂停。</div>
+              <!-- 声音来源（D-033）：只用麦克风 / 麦克风 + 会议软件 / 只用会议软件的声音 -->
+              <div class="start-row source-row">
+                <select id="meeting-source" title="录哪里的声音">
+                  <option value="mic">只用麦克风（线下会议）</option>
+                  <option value="mixed">麦克风 + 会议软件（线上会议，现场也有人）</option>
+                  <option value="app">只用会议软件的声音</option>
+                </select>
+                <select id="meeting-app" title="截取哪个应用播放出来的声音"></select>
+                <select id="meeting-speakers" title="按人数区分说话人（会中、会后都能再改）"></select>
+                <select id="meeting-remote" title="会议软件里有几个人说话（会中、会后都能再改）"></select>
+              </div>
+              <div class="hint" id="meeting-source-hint"></div>
+              <div class="hint">选好人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；录音只在本机临时保存，整理完自动删除。会议进行中 Fn 听写暂停。</div>
               <div class="hint" id="meeting-start-state"></div>
             </div>
             <div id="meeting-list" class="meeting-list"></div>

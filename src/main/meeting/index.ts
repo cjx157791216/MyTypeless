@@ -1,7 +1,7 @@
 import { app, powerMonitor } from 'electron'
 import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, unlinkSync, writeSync } from 'fs'
 import { join } from 'path'
-import type { MeetingLive, MeetingStartOptions } from '../../shared/types'
+import type { MeetingLive, MeetingSource, MeetingStartOptions, MeetingTrack } from '../../shared/types'
 import { getKey, hasKey, loadSettings, saveSettings } from '../config'
 import { listWords } from '../history'
 import { SAMPLE_RATE } from '../live'
@@ -24,7 +24,9 @@ import {
   type ClusterItem,
   type VoicedPart
 } from './cluster'
+import { AppAudioCapture, appAudioSupported, prepareAppAudio, type AppAudioEvent } from './app-audio'
 import { denoiser, diarizer, speakerModel } from './diarizer'
+import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
 import {
   buildTranscript,
@@ -36,7 +38,18 @@ import {
   wrapChunkNotes,
   wrapMeetingTranscript
 } from './minutes'
-import { MEETING_VAD, MEETING_VAD_DENOISED, UtteranceSegmenter, planFeed, samplesToMs, splitByTurns, turnsInUtterance, type Part, type Utterance } from './segmenter'
+import {
+  MEETING_VAD,
+  MEETING_VAD_DENOISED,
+  UtteranceSegmenter,
+  alignPad,
+  planFeed,
+  samplesToMs,
+  splitByTurns,
+  turnsInUtterance,
+  type Part,
+  type Utterance
+} from './segmenter'
 import * as store from './store'
 
 /**
@@ -45,6 +58,8 @@ import * as store from './store'
  * + 声纹（原始录音，mt-diarize，串行）
  * → 在线归类说话人 → 定稿即落库 → 结束时整场重新归类 → LLM 生成纪要 → 删除临时录音。
  * 识别与声纹各自同一时刻只有一个请求；声纹进程低优先级，不影响其他工作。
+ * 线上会议（D-033）：声音来源可选只用麦克风 / 麦克风 + 会议软件的声音 / 只用会议软件的声音。每一路（Track）各自写临时录音、
+ * 分句、区分说话人（各有人数），两路对齐到同一条时间线（alignPad）；麦克风那一路先去掉外放的回声（removeEcho）再识别。
  */
 
 const MAX_MEETING_MS = 4 * 3600_000
@@ -59,37 +74,49 @@ const REGROUP_EVERY_MS = 20_000
 const MAX_SPEAKERS = 10 // 参会人数选项的上限（与主窗口的选择框一致）
 /** 句内换人检测带上的参考录音长度（8 秒：真人录音实测与 10、15 秒结果相同，更省 CPU） */
 const TURN_CONTEXT_SAMPLES = SAMPLE_RATE * 8
+const ECHO_LEAD = ECHO_LEAD_FRAMES * (SAMPLE_RATE / 50)
+const ECHO_AHEAD = ECHO_AHEAD_FRAMES * (SAMPLE_RATE / 50)
 
-interface Active {
-  id: string
-  title: string
+/** 会议录音的一路（D-033）：麦克风（现场，track 0）或应用声音（线上，track 1） */
+interface Track {
+  track: MeetingTrack
   audioPath: string
   fd: number
   written: number // 已写入的样本数（= 会议时间线位置）
   segmenter: UtteranceSegmenter
   clusterer: OnlineClusterer
-  denoise: boolean // 本场是否边录边降噪（开会时降噪模型已就绪）
+  denoise: boolean // 本路是否边录边降噪（只有麦克风；开会时降噪模型已就绪）
   dnChain: Promise<void> // 降噪与分句（按录音顺序串行）
   dnSent: number // 已送去降噪的样本数
   segFed: number // 已送入分句的样本数（降噪输出或原始录音）
-  expected: number // 参会人数：会中最多分出这么多人（D-021）
+  expected: number // 这一路的人数：会中最多分出这么多人（D-021）
+  failed: Array<[number, number]> // 识别失败的句子（结束时重试）
+  lastSpeaker: number | null
+  newSegments: number // 上次整体重新归类之后新增的段数
+  capture: AppAudioCapture | null // 应用声音的截取进程（只有 track 1）
+}
+
+interface Active {
+  id: string
+  title: string
+  source: MeetingSource
+  appName: string
+  tracks: Track[]
   prints: Array<{ id: number; name: string; samples: number; vector: Float32Array }>
   embeddings: Map<number, Float32Array> // 句子 id → 声音特征（只在内存，整理完丢弃）
   asr: AsrProvider
   words: string[]
   asrChain: Promise<void>
   diarChain: Promise<unknown>
-  failed: Array<[number, number]> // 识别失败的句子（结束时重试）
-  lastSpeaker: number | null
   paused: boolean
   elapsedBefore: number // 之前各段的录音时长
   runningSince: number // 本段开始的时间（暂停时为 0）
   warned: boolean
   ticker: NodeJS.Timeout
-  newSegments: number // 上次整体重新归类之后新增的段数
   lastRegroupAt: number
   embedOk: number // 声纹计算成功 / 失败次数：一直失败时提示，不再悄悄全部“未区分”
   embedFailed: number
+  echoNoticed: boolean // 已提示过外放回声
 }
 
 export interface MeetingHooks {
@@ -155,6 +182,12 @@ export class MeetingManager {
   private async startNow(opts: MeetingStartOptions): Promise<{ ok: boolean; error?: string; meetingId?: string }> {
     if (this.processing) return { ok: false, error: '上一场会议还在整理中，请稍候' }
     const settings = loadSettings()
+    const source: MeetingSource = opts.source ?? settings.meetingSource ?? 'mic'
+    if (source !== 'mic' && !appAudioSupported()) return { ok: false, error: '截取会议软件的声音需要 macOS 14.2 或更新版本；可以改为只用麦克风' }
+    // 先完成「录制系统音频」授权（允许后系统会重新打开 MyTypeless，不能等到会议中途）
+    if (source !== 'mic' && (await prepareAppAudio()) === 'waiting') {
+      return { ok: false, error: '请先在系统弹出的对话框里允许 MyTypeless 录制系统音频（允许后 MyTypeless 会自动重新打开），然后再开始会议' }
+    }
     let asr: AsrProvider
     if (settings.asr.provider === 'builtin') {
       if (!builtinReady(settings)) return { ok: false, error: '还没有下载语音识别模型：请先在设置 → 语音识别里下载' }
@@ -165,112 +198,193 @@ export class MeetingManager {
     }
     const models = speakerModel.ensure() // 首次开会时下载声纹模型；下载完成前的句子之后补做
     // 已有声纹模型、只缺降噪模型（约 0.5MB，D-024）：等一会儿，下好了本场就能边录边降噪
-    if (speakerModel.ready() && !speakerModel.denoiserReady()) await Promise.race([models, new Promise((r) => setTimeout(r, 5000))])
+    if (source !== 'app' && speakerModel.ready() && !speakerModel.denoiserReady()) await Promise.race([models, new Promise((r) => setTimeout(r, 5000))])
 
     const dir = join(app.getPath('userData'), 'meetings')
     mkdirSync(dir, { recursive: true })
     const startedAt = Date.now()
     const title = opts.title?.trim() || defaultTitle(startedAt)
-    const audioPath = join(dir, `${startedAt}.pcm`)
     const expected = speakerCount(opts.expectedSpeakers ?? settings.meetingSpeakers)
-    const denoise = speakerModel.denoiserReady()
-    if (expected !== settings.meetingSpeakers) saveSettings({ meetingSpeakers: expected })
-    const id = store.createMeeting({ title, startedAt, expectedSpeakers: expected, audioPath })
-    const a: Active = {
-      id,
+    const expectedRemote = speakerCount(opts.expectedRemote ?? settings.meetingRemoteSpeakers)
+    const appBundleId = source === 'mic' ? '' : (opts.appBundleId ?? settings.meetingApp ?? '')
+    const appName = source === 'mic' ? '' : opts.appName?.trim() || (appBundleId ? appBundleId : '系统声音')
+    saveSettings({
+      meetingSource: source,
+      ...(source !== 'app' ? { meetingSpeakers: expected } : {}),
+      ...(source !== 'mic' ? { meetingRemoteSpeakers: expectedRemote, meetingApp: appBundleId } : {})
+    })
+    const micPath = source !== 'app' ? join(dir, `${startedAt}.pcm`) : null
+    const appPath = source !== 'mic' ? join(dir, `${startedAt}-app.pcm`) : null
+    const id = store.createMeeting({
       title,
-      audioPath,
-      fd: openSync(audioPath, 'a'),
+      startedAt,
+      expectedSpeakers: source !== 'app' ? expected : null,
+      audioPath: micPath,
+      source,
+      appAudioPath: appPath,
+      appName: appName || null,
+      expectedRemote: source !== 'mic' ? expectedRemote : null
+    })
+    const denoise = speakerModel.denoiserReady()
+    const newTrack = (track: MeetingTrack, path: string, n: number): Track => ({
+      track,
+      audioPath: path,
+      fd: openSync(path, 'a'),
       written: 0,
-      segmenter: new UtteranceSegmenter(denoise ? MEETING_VAD_DENOISED : MEETING_VAD),
+      // 应用声音是会议软件解码后的干净人声，不降噪（流式降噪器只有一个状态，留给麦克风）
+      segmenter: new UtteranceSegmenter(track === 0 && denoise ? MEETING_VAD_DENOISED : MEETING_VAD),
       clusterer: new OnlineClusterer(),
-      denoise,
+      denoise: track === 0 && denoise,
       dnChain: Promise.resolve(),
       dnSent: 0,
       segFed: 0,
-      expected,
+      expected: n,
+      failed: [],
+      lastSpeaker: null,
+      newSegments: 0,
+      capture: null
+    })
+    const tracks: Track[] = []
+    if (micPath) tracks.push(newTrack(0, micPath, expected))
+    if (appPath) tracks.push(newTrack(1, appPath, expectedRemote))
+    const a: Active = {
+      id,
+      title,
+      source,
+      appName,
+      tracks,
       prints: store.voiceprintVectors(),
       embeddings: new Map(),
       asr,
       words: listWords().map((w) => w.word),
       asrChain: Promise.resolve(),
       diarChain: Promise.resolve(),
-      failed: [],
-      lastSpeaker: null,
       paused: false,
       elapsedBefore: 0,
       runningSince: Date.now(),
       warned: false,
       ticker: setInterval(() => this.tick(), 1000),
-      newSegments: 0,
       lastRegroupAt: Date.now(),
       embedOk: 0,
-      embedFailed: 0
+      embedFailed: 0,
+      echoNoticed: false
     }
     this.active = a
-    this.hooks.setCapture(true, settings.micDeviceId ?? '')
-    if (powerMonitor.isOnBatteryPower()) this.flash('正在使用电池：长时间会议建议接上电源')
+    this.startCapture(a, appBundleId)
+    if (source === 'mixed') this.flash('建议戴耳机：外放时对方的声音会被麦克风再录一遍（重复的部分会自动去掉）', 10_000)
+    else if (powerMonitor.isOnBatteryPower()) this.flash('正在使用电池：长时间会议建议接上电源')
     this.emit()
     this.hooks.onChanged(id)
     return { ok: true, meetingId: id }
   }
 
-  /** 浮动条送来的录音分片 */
+  /** 开始 / 继续采集：麦克风经浮动条，应用声音经 mt-audiotap */
+  private startCapture(a: Active, appBundleId?: string): void {
+    if (this.track(a, 0)) this.hooks.setCapture(true, loadSettings().micDeviceId ?? '')
+    const t = this.track(a, 1)
+    if (!t) return
+    const bundle = appBundleId ?? (a.source === 'mic' ? '' : loadSettings().meetingApp ?? '')
+    t.capture = new AppAudioCapture(bundle, (pcm) => this.pushTrack(a, t, pcm), (e) => this.onAppAudio(a, e))
+    t.capture.start()
+  }
+
+  private stopCapture(a: Active): void {
+    if (this.track(a, 0)) this.hooks.setCapture(false, '')
+    const t = this.track(a, 1)
+    t?.capture?.stop()
+    if (t) t.capture = null
+  }
+
+  private onAppAudio(a: Active, e: AppAudioEvent): void {
+    if (this.active !== a) return
+    const name = a.appName === '系统声音' ? '系统' : `「${a.appName}」`
+    if (e.type === 'waiting-permission') this.flash(`请在系统弹出的对话框里允许 MyTypeless 录制系统音频，才能转写${name}里对方的声音`, 30_000)
+    else if (e.type === 'ready' && this.notice?.text.includes('录制系统音频')) this.notice = null
+    else if (e.type === 'silent')
+      this.flash(`一直没有收到${name}的声音：如果对方在说话，请到 系统设置 → 隐私与安全性 → 录屏与系统录音，在「仅系统录音」里允许 MyTypeless`, 20_000)
+    else if (e.type === 'failed') this.flash(`无法截取${name}的声音（${e.error}）${a.source === 'mixed' ? '，本场先只用麦克风' : ''}`, 15_000)
+    this.emit()
+  }
+
+  private track(a: Active, track: MeetingTrack): Track | undefined {
+    return a.tracks.find((t) => t.track === track)
+  }
+
+  /** 浮动条送来的麦克风录音分片 */
   pushAudio(pcm: Int16Array): void {
     const a = this.active
-    if (!a || a.paused || !pcm.length) return
+    const t = a && this.track(a, 0)
+    if (a && t) this.pushTrack(a, t, pcm)
+  }
+
+  /** 某一路的录音分片：写入临时录音 → 降噪（麦克风）/ 直接分句 */
+  private pushTrack(a: Active, t: Track, pcm: Int16Array): void {
+    if (this.active !== a || a.paused || !pcm.length) return
+    // 两路时：按真实时间对齐到同一条时间线（采集晚到、进程重启的缺口补静音）
+    if (a.tracks.length > 1) {
+      const pad = alignPad(t.written, pcm.length, Math.round((this.elapsed(a) / 1000) * SAMPLE_RATE))
+      if (pad > 0) this.writeTrack(t, new Int16Array(pad))
+    }
+    this.writeTrack(t, pcm)
+  }
+
+  private writeTrack(t: Track, pcm: Int16Array): void {
+    const a = this.active!
     try {
-      writeSync(a.fd, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength))
+      writeSync(t.fd, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength))
     } catch (err) {
       console.warn('[meeting] write audio failed:', err)
     }
-    a.written += pcm.length
-    if (!a.denoise) {
-      for (const u of a.segmenter.push(pcm)) this.onUtterance(a, u)
-      a.segFed = a.written
+    t.written += pcm.length
+    if (!t.denoise) {
+      for (const u of t.segmenter.push(pcm)) this.onUtterance(a, t, u)
+      t.segFed = t.written
       return
     }
-    if (a.written - a.dnSent >= DENOISE_BATCH) this.sendToDenoiser(a)
+    if (t.written - t.dnSent >= DENOISE_BATCH) this.sendToDenoiser(a, t)
   }
 
   /** 把还没送出的录音送去降噪，结果按顺序送入分句（D-024） */
-  private sendToDenoiser(a: Active): void {
-    const start = a.dnSent
-    const count = a.written - start
+  private sendToDenoiser(a: Active, t: Track): void {
+    const start = t.dnSent
+    const count = t.written - start
     if (count <= 0) return
-    a.dnSent = a.written
-    a.dnChain = a.dnChain.then(async () => this.feedSegmenter(a, await denoiser.denoiseFeed(a.audioPath, start, count).catch(() => null), start + count))
+    t.dnSent = t.written
+    t.dnChain = t.dnChain.then(async () => this.feedSegmenter(a, t, await denoiser.denoiseFeed(t.audioPath, start, count).catch(() => null), start + count))
   }
 
   /** 暂停、结束：送出剩余录音、取回降噪器里剩下的部分、结束正在说的一句；返回分出的句子都已交给 onUtterance 的 Promise */
   private drainSegmenter(a: Active): Promise<void> {
-    if (a.denoise) {
-      this.sendToDenoiser(a)
-      a.dnChain = a.dnChain.then(async () => this.feedSegmenter(a, await denoiser.denoiseFlush().catch(() => null), a.dnSent))
-    }
-    a.dnChain = a.dnChain.then(() => {
-      for (const u of a.segmenter.flush()) this.onUtterance(a, u)
-    })
-    return a.dnChain
+    return Promise.all(
+      a.tracks.map((t) => {
+        if (t.denoise) {
+          this.sendToDenoiser(a, t)
+          t.dnChain = t.dnChain.then(async () => this.feedSegmenter(a, t, await denoiser.denoiseFlush().catch(() => null), t.dnSent))
+        }
+        t.dnChain = t.dnChain.then(() => {
+          for (const u of t.segmenter.flush()) this.onUtterance(a, t, u)
+        })
+        return t.dnChain
+      })
+    ).then(() => undefined)
   }
 
   /** 降噪输出按录音时间线接入分句；失败或有缺口时用临时文件里的原始录音补上（planFeed） */
-  private feedSegmenter(a: Active, r: { at: number; pcm: Int16Array } | null, upTo: number): void {
+  private feedSegmenter(a: Active, t: Track, r: { at: number; pcm: Int16Array } | null, upTo: number): void {
     const push = (pcm: Int16Array) => {
-      for (const u of a.segmenter.push(pcm)) this.onUtterance(a, u)
-      a.segFed += pcm.length
+      for (const u of t.segmenter.push(pcm)) this.onUtterance(a, t, u)
+      t.segFed += pcm.length
     }
-    for (const step of planFeed(a.segFed, r, upTo)) {
+    for (const step of planFeed(t.segFed, r, upTo)) {
       if ('pcm' in step) push(step.pcm)
-      else readPcm(a.audioPath, step.raw[0], step.raw[1] - step.raw[0], push)
+      else readPcm(t.audioPath, step.raw[0], step.raw[1] - step.raw[0], push)
     }
   }
-
 
   pause(): void {
     const a = this.active
     if (!a || a.paused) return
-    this.hooks.setCapture(false, '')
+    this.stopCapture(a)
     void this.drainSegmenter(a)
     a.elapsedBefore = this.elapsed(a)
     a.runningSince = 0
@@ -285,7 +399,7 @@ export class MeetingManager {
     a.paused = false
     a.runningSince = Date.now()
     store.updateMeeting(a.id, { status: 'recording' })
-    this.hooks.setCapture(true, loadSettings().micDeviceId ?? '')
+    this.startCapture(a)
     this.emit()
   }
 
@@ -293,7 +407,7 @@ export class MeetingManager {
   async stop(opts: { minutes?: boolean } = {}): Promise<void> {
     const a = this.active
     if (!a) return
-    this.hooks.setCapture(false, '')
+    this.stopCapture(a)
     clearInterval(a.ticker)
     const drained = this.drainSegmenter(a)
     const durationMs = this.elapsed(a)
@@ -304,13 +418,15 @@ export class MeetingManager {
     await drained
     await a.asrChain
     await a.diarChain
-    try {
-      closeSync(a.fd)
-    } catch {
-      /* noop */
+    for (const t of a.tracks) {
+      try {
+        closeSync(t.fd)
+      } catch {
+        /* noop */
+      }
     }
     // 识别失败过的句子再试一次（录音在临时文件里）
-    for (const [s, e] of a.failed) await this.transcribeRange(a.id, a.audioPath, s, e, a.asr, a.words, null)
+    for (const t of a.tracks) for (const [s, e] of t.failed) await this.transcribeRange(a.id, t.track, t.audioPath, s, e, a.asr, a.words, null)
     await this.organize(a.id, a.embeddings, a.prints, opts.minutes !== false)
   }
 
@@ -323,23 +439,31 @@ export class MeetingManager {
     store.updateMeeting(meetingId, { status: 'processing' })
     this.emit()
     const settings = loadSettings()
-    if (row.audio_path && existsSync(row.audio_path)) {
+    const paths = store.trackPaths(row)
+    const appPath = row.source === 'mixed' ? row.app_audio_path : null
+    let duration = 0
+    for (const [track, path] of paths) {
+      if (!path || !existsSync(path)) continue
       try {
         const asr = settings.asr.provider === 'builtin' ? createBuiltinAsr(settings) : createAsrProvider(settings, getKey('asr'))
         const words = listWords().map((w) => w.word)
-        const last = store.listSegments(meetingId).reduce((m, s) => Math.max(m, s.endSample), 0)
-        const total = Math.floor(statSync(row.audio_path).size / 2)
-        store.updateMeeting(meetingId, { durationMs: samplesToMs(total) }) // 录音时间线即会议时长（暂停不计）
+        const last = store.listSegments(meetingId).filter((s) => s.track === track).reduce((m, s) => Math.max(m, s.endSample), 0)
+        const total = Math.floor(statSync(path).size / 2)
+        duration = Math.max(duration, total)
         const seg = new UtteranceSegmenter()
-        const offset = last
         const utterances: Utterance[] = []
-        readPcm(row.audio_path, last, total - last, (chunk) => utterances.push(...seg.push(chunk)))
+        readPcm(path, last, total - last, (chunk) => utterances.push(...seg.push(chunk)))
         utterances.push(...seg.flush())
-        for (const u of utterances) await this.transcribeRange(meetingId, row.audio_path, u.start + offset, u.end + offset, asr, words, null)
+        for (const u of utterances) {
+          // 麦克风那一路同样去掉外放回声
+          const parts = track === 0 && appPath && existsSync(appPath) ? echoFree(path, appPath, u.start + last, u.end + last) : [{ start: u.start + last, end: u.end + last }]
+          for (const p of parts) await this.transcribeRange(meetingId, track, path, p.start, p.end, asr, words, null)
+        }
       } catch (err) {
         console.warn('[meeting] recover tail failed:', err)
       }
     }
+    if (duration) store.updateMeeting(meetingId, { durationMs: samplesToMs(duration) }) // 录音时间线即会议时长（暂停不计）
     if (!row.ended_at) store.updateMeeting(meetingId, { endedAt: Date.now() })
     await this.organize(meetingId, new Map(), store.voiceprintVectors(), opts.minutes !== false)
     return { ok: true }
@@ -368,7 +492,7 @@ export class MeetingManager {
     store.updateSpeaker(speakerId, { name: clean })
     // 旧声纹模型的会议：声纹与当前声纹库不可比，只改名不保存声纹（D-026）
     if (clean && remember && store.usesCurrentModel(meetingId)) {
-      const v = this.speakerVector(meetingId, speakerId)
+      const v = this.speakerVector(meetingId, sp.track, speakerId)
       if (v) {
         const n = Math.max(1, store.listSegments(meetingId).filter((s) => s.speakerId === speakerId).length)
         const existing = store.voiceprintVectors().find((p) => p.id === sp.voiceprint_id) ?? store.voiceprintVectors().find((p) => p.name === clean)
@@ -386,7 +510,11 @@ export class MeetingManager {
   }
 
   assignSegment(meetingId: string, segmentId: number, speakerId: number | 'new'): void {
-    const target = speakerId === 'new' ? store.addSpeaker(meetingId) : speakerId
+    const seg = store.listSegments(meetingId).find((s) => s.id === segmentId)
+    if (!seg) return
+    // 说话人只在同一路之间改（现场的话不能归给线上的人）
+    if (speakerId !== 'new' && store.getSpeaker(speakerId)?.track !== seg.track) return
+    const target = speakerId === 'new' ? store.addSpeaker(meetingId, seg.track) : speakerId
     store.setSegmentSpeaker(segmentId, target, true)
     store.pruneSpeakers(meetingId)
     this.hooks.onChanged(meetingId)
@@ -394,8 +522,11 @@ export class MeetingManager {
 
   mergeSpeakers(meetingId: string, from: number, into: number): void {
     if (from === into) return
+    const a = store.getSpeaker(from)
+    const b = store.getSpeaker(into)
+    if (!a || !b || a.track !== b.track) return
     store.mergeSpeakers(from, into)
-    if (this.active?.id === meetingId) this.active.clusterer.merge(from, into)
+    if (this.active?.id === meetingId) this.track(this.active, a.track)?.clusterer.merge(from, into)
     this.hooks.onChanged(meetingId)
   }
 
@@ -413,20 +544,25 @@ export class MeetingManager {
     return { ok: true }
   }
 
-  /** 改参会人数（null = 自动）：会议中或会后都立即按新人数重新区分说话人（D-020） */
-  setExpected(meetingId: string, count: number): { ok: boolean; error?: string } {
+  /** 改某一路的人数（0 = 现场 / 1 = 线上）：会议中或会后都立即按新人数重新区分这一路的说话人（D-020、D-033） */
+  setExpected(meetingId: string, count: number, track: MeetingTrack = 0): { ok: boolean; error?: string } {
     const n = speakerCount(count)
-    store.setExpectedSpeakers(meetingId, n)
-    saveSettings({ meetingSpeakers: n })
+    const row = store.getMeetingRow(meetingId)
+    if (row?.source === 'app') track = 1
+    else if (row?.source !== 'mixed') track = 0
+    store.setExpectedSpeakers(meetingId, n, track)
+    saveSettings(track === 1 ? { meetingRemoteSpeakers: n } : { meetingSpeakers: n })
     const live = this.active?.id === meetingId ? this.active : null
-    if (live) live.expected = n
+    const liveTrack = live ? this.track(live, track) : undefined
+    if (liveTrack) liveTrack.expected = n
     const embeddings = live ? live.embeddings : store.segmentEmbeddings(meetingId)
-    if (!embeddings.size) {
+    const trackSegs = new Set(store.listSegments(meetingId).filter((s) => s.track === track).map((s) => s.id))
+    if (![...embeddings.keys()].some((id) => trackSegs.has(id))) {
       this.hooks.onChanged(meetingId)
       return { ok: false, error: '这场会议没有保存逐句声纹（较早的会议），无法自动重新区分；可以手动合并说话人' }
     }
     const prints = live ? live.prints : store.voiceprintVectors()
-    this.applyRegroup(meetingId, embeddings, prints, n, live)
+    this.applyRegroup(meetingId, track, embeddings, prints, n, liveTrack ?? null)
     if (!live) store.relabelSpeakers(meetingId)
     this.hooks.onChanged(meetingId)
     return { ok: true }
@@ -435,8 +571,7 @@ export class MeetingManager {
   /** 删除会议（进行中的会议不能删） */
   delete(meetingId: string): boolean {
     if (this.active?.id === meetingId || this.processing?.id === meetingId) return false
-    const audio = store.deleteMeeting(meetingId)
-    removeFile(audio)
+    for (const path of store.deleteMeeting(meetingId)) removeFile(path)
     return true
   }
 
@@ -461,19 +596,24 @@ export class MeetingManager {
     }
     if (e >= MAX_MEETING_MS) void this.stop()
     // 会议进行中定期整体重新区分说话人：纠正早期在线归类的错误（不必等到会议结束）
-    if (a.newSegments > 0 && Date.now() - a.lastRegroupAt >= REGROUP_EVERY_MS) {
+    if (a.tracks.some((t) => t.newSegments > 0) && Date.now() - a.lastRegroupAt >= REGROUP_EVERY_MS) {
       a.lastRegroupAt = Date.now()
-      a.newSegments = 0
-      try {
-        if (this.applyRegroup(a.id, a.embeddings, a.prints, a.expected, a).changed) this.hooks.onChanged(a.id)
-      } catch (err) {
-        console.warn('[meeting] live regroup failed:', err)
+      let changed = false
+      for (const t of a.tracks) {
+        if (!t.newSegments) continue
+        t.newSegments = 0
+        try {
+          if (this.applyRegroup(a.id, t.track, a.embeddings, a.prints, t.expected, t).changed) changed = true
+        } catch (err) {
+          console.warn('[meeting] live regroup failed:', err)
+        }
       }
+      if (changed) this.hooks.onChanged(a.id)
     }
   }
 
-  private flash(text: string): void {
-    this.notice = { text, until: Date.now() + NOTICE_TTL_MS }
+  private flash(text: string, ttl = NOTICE_TTL_MS): void {
+    this.notice = { text, until: Date.now() + ttl }
     this.emit()
   }
 
@@ -481,24 +621,37 @@ export class MeetingManager {
     this.hooks.onLive(this.live())
   }
 
+  /** 麦克风一路（麦克风 + 应用声音时）：先去掉外放的回声，剩下的部分各按一句处理 */
+  private onUtterance(a: Active, t: Track, u: Utterance): void {
+    const app = t.track === 0 ? this.track(a, 1) : undefined
+    if (!app) return this.processUtterance(a, t, u)
+    const parts = echoFree(t.audioPath, app.audioPath, u.start, u.end)
+    if (parts.length === 1 && parts[0].start === u.start && parts[0].end === u.end) return this.processUtterance(a, t, u)
+    if (!a.echoNoticed) {
+      a.echoNoticed = true
+      this.flash('检测到外放的回声：麦克风录到的对方声音已自动去掉；戴耳机效果更好', 10_000)
+    }
+    for (const p of parts) this.processUtterance(a, t, { start: p.start, end: p.end, pcm: u.pcm.subarray(p.start - u.start, p.end - u.start) })
+  }
+
   /**
    * 一句话：先找句内换人的位置（真人对话常常不停顿就接话），按人切成几段；
    * 每段的声纹（mt-diarize，串行）与识别（串行）并行进行，两者都完成后落库。
    */
-  private onUtterance(a: Active, u: Utterance): void {
+  private processUtterance(a: Active, t: Track, u: Utterance): void {
     const whole: Part[] = [{ start: u.start, end: u.end }]
-    const canSplit = a.expected > 1 && speakerModel.ready() && samplesToMs(u.end - u.start) >= MIN_SPLIT_MS
+    const canSplit = t.expected > 1 && speakerModel.ready() && samplesToMs(u.end - u.start) >= MIN_SPLIT_MS
     // 已经区分出几个人（各至少说过 KNOWN_MIN_SEGMENTS 句）：按窗口与各人比较找换人位置（D-025）；
     // 会议刚开始还不知道各人的声音：用分段模型，带上句子前面一段录音做参考（分段模型在几秒的短片段里分不清人）
-    const byWindows = canSplit && a.clusterer.countWith(KNOWN_MIN_SEGMENTS) >= 2
+    const byWindows = canSplit && t.clusterer.countWith(KNOWN_MIN_SEGMENTS) >= 2
     const ctxStart = Math.max(0, u.start - TURN_CONTEXT_SAMPLES)
     const partsReady: Promise<Part[]> = !canSplit
       ? Promise.resolve(whole)
       : byWindows
-        ? (a.diarChain = a.diarChain.then(() => this.splitWithWindows(a, u)).catch(() => whole)) as Promise<Part[]>
+        ? (a.diarChain = a.diarChain.then(() => this.splitWithWindows(t, u)).catch(() => whole)) as Promise<Part[]>
         : (a.diarChain = a.diarChain
-            .then(() => diarizer.turns(a.audioPath, ctxStart, u.end - ctxStart))
-            .then((t) => (t ? splitByTurns(u.start, u.end, turnsInUtterance(ctxStart, u.start, u.end, t)) : whole))
+            .then(() => diarizer.turns(t.audioPath, ctxStart, u.end - ctxStart))
+            .then((r) => (r ? splitByTurns(u.start, u.end, turnsInUtterance(ctxStart, u.start, u.end, r)) : whole))
             .catch(() => whole)) as Promise<Part[]>
     // 切好后立刻排队算每段声纹；分段模型切出的同一人相邻段合回一段再识别（按窗口切的已按人分好，不再合）
     const planned: Promise<VoicedPart[]> = partsReady.then(async (parts) => {
@@ -507,7 +660,7 @@ export class MeetingManager {
           ...p,
           v:
             samplesToMs(p.end - p.start) >= MIN_EMBED_MS
-              ? ((await (a.diarChain = a.diarChain.then(() => diarizer.embed(a.audioPath, p.start, p.end - p.start)).catch(() => null))) as Float32Array | null)
+              ? ((await (a.diarChain = a.diarChain.then(() => diarizer.embed(t.audioPath, p.start, p.end - p.start)).catch(() => null))) as Float32Array | null)
               : null
         }))
       )
@@ -516,13 +669,13 @@ export class MeetingManager {
     a.asrChain = a.asrChain.then(async () => {
       for (const p of await planned) {
         // 识别用原始录音（降噪后的声音只用于分句：弱的人声会被一起削掉，D-024），音量归一后识别
-        const pcm = normalizeLoudness(a.denoise ? readRange(a.audioPath, p.start, p.end) : u.pcm.subarray(p.start - u.start, p.end - u.start))
+        const pcm = normalizeLoudness(t.denoise ? readRange(t.audioPath, p.start, p.end) : u.pcm.subarray(p.start - u.start, p.end - u.start))
         let text: string
         try {
           text = (await a.asr.transcribe(pcm16ToWav(pcm, SAMPLE_RATE, 1), { vocabulary: a.words })).text.trim()
         } catch (err) {
           console.warn('[meeting] transcribe failed:', err)
-          a.failed.push([p.start, p.end])
+          t.failed.push([p.start, p.end])
           continue
         }
         if (!text || isHallucination(text)) continue
@@ -531,11 +684,11 @@ export class MeetingManager {
         else if (speakerModel.ready() && samplesToMs(p.end - p.start) >= MIN_EMBED_MS && ++a.embedFailed === 3 && !a.embedOk) {
           this.flash('说话人区分暂时不可用（声纹计算失败），本场会议先只转写；结束后可手动标注说话人')
         }
-        const speakerId = v ? this.assignSpeaker(a, v) : a.lastSpeaker
-        const id = store.addSegment(a.id, { speakerId, startSample: p.start, endSample: p.end, text, embedding: v })
+        const speakerId = v ? this.assignSpeaker(a, t, v) : t.lastSpeaker
+        const id = store.addSegment(a.id, { speakerId, startSample: p.start, endSample: p.end, text, embedding: v, track: t.track })
         if (v) a.embeddings.set(id, v)
-        a.lastSpeaker = speakerId
-        a.newSegments++
+        t.lastSpeaker = speakerId
+        t.newSegments++
         this.hooks.onChanged(a.id)
       }
     })
@@ -551,12 +704,13 @@ export class MeetingManager {
     this.backfilling = true
     try {
       for (const s of pending) {
-        if (samplesToMs(s.endSample - s.startSample) < MIN_EMBED_MS) continue
-        const v = await (a.diarChain = a.diarChain.then(() => diarizer.embed(a.audioPath, s.startSample, s.endSample - s.startSample)).catch(() => null))
+        const t = this.track(a, s.track)
+        if (!t || samplesToMs(s.endSample - s.startSample) < MIN_EMBED_MS) continue
+        const v = await (a.diarChain = a.diarChain.then(() => diarizer.embed(t.audioPath, s.startSample, s.endSample - s.startSample)).catch(() => null))
         if (!(v instanceof Float32Array)) continue
         a.embeddings.set(s.id, v)
         store.setSegmentEmbedding(s.id, v)
-        store.setSegmentSpeaker(s.id, this.assignSpeaker(a, v))
+        store.setSegmentSpeaker(s.id, this.assignSpeaker(a, t, v))
       }
       this.hooks.onChanged(a.id)
     } finally {
@@ -565,34 +719,43 @@ export class MeetingManager {
   }
 
   /** 按窗口找句内换人位置（在 diarChain 内调用）：每 0.5 秒取 1.5 秒算声纹，与已区分出的各人比较（splitByWindows） */
-  private async splitWithWindows(a: Active, u: Utterance): Promise<Part[]> {
+  private async splitWithWindows(t: Track, u: Utterance): Promise<Part[]> {
     const w = (SAMPLE_RATE * WINDOW_MS) / 1000
     const hop = (SAMPLE_RATE * WINDOW_HOP_MS) / 1000
     const vecs: Array<{ center: number; v: Float32Array }> = []
     for (let s = u.start; s + w <= u.end + hop / 2; s += hop) {
       const st = Math.min(s, u.end - w)
-      const v = await diarizer.embed(a.audioPath, st, w)
+      const v = await diarizer.embed(t.audioPath, st, w)
       if (v) vecs.push({ center: st + w / 2, v })
     }
-    const keys = vecs.length ? a.clusterer.scores(vecs[0].v, KNOWN_MIN_SEGMENTS).map((x) => x.key) : []
+    const keys = vecs.length ? t.clusterer.scores(vecs[0].v, KNOWN_MIN_SEGMENTS).map((x) => x.key) : []
     if (keys.length < 2) return [{ start: u.start, end: u.end }]
     const wins = vecs.map(({ center, v }) => {
-      const sc = new Map(a.clusterer.scores(v, KNOWN_MIN_SEGMENTS).map((x) => [x.key, x.sim]))
+      const sc = new Map(t.clusterer.scores(v, KNOWN_MIN_SEGMENTS).map((x) => [x.key, x.sim]))
       return { center, scores: keys.map((k) => sc.get(k) ?? -1) }
     })
     return splitByWindows(u.start, u.end, wins, (SAMPLE_RATE * WINDOW_MIN_PART_MS) / 1000)
   }
 
   /** 在线归类（名字由定期整体归类时按声纹库认出，见 applyRegroup） */
-  private assignSpeaker(a: Active, v: Float32Array): number {
-    return a.clusterer.assign(v, () => store.addSpeaker(a.id), a.expected).key
+  private assignSpeaker(a: Active, t: Track, v: Float32Array): number {
+    return t.clusterer.assign(v, () => store.addSpeaker(a.id, t.track), t.expected).key
   }
 
-  private async transcribeRange(meetingId: string, audioPath: string, start: number, end: number, asr: AsrProvider, words: string[], speakerId: number | null): Promise<void> {
+  private async transcribeRange(
+    meetingId: string,
+    track: MeetingTrack,
+    audioPath: string,
+    start: number,
+    end: number,
+    asr: AsrProvider,
+    words: string[],
+    speakerId: number | null
+  ): Promise<void> {
     try {
       const pcm = normalizeLoudness(readRange(audioPath, start, end))
       const text = (await asr.transcribe(pcm16ToWav(pcm, SAMPLE_RATE, 1), { vocabulary: words })).text.trim()
-      if (text && !isHallucination(text)) store.addSegment(meetingId, { speakerId, startSample: start, endSample: end, text })
+      if (text && !isHallucination(text)) store.addSegment(meetingId, { speakerId, startSample: start, endSample: end, text, track })
     } catch (err) {
       console.warn('[meeting] retry transcribe failed:', err)
     }
@@ -615,7 +778,8 @@ export class MeetingManager {
     }
     const row = store.getMeetingRow(meetingId)
     removeFile(row?.audio_path ?? null)
-    store.updateMeeting(meetingId, { status: 'done', audioPath: null })
+    removeFile(row?.app_audio_path ?? null)
+    store.updateMeeting(meetingId, { status: 'done', audioPath: null, appAudioPath: null })
     this.processing = null
     this.emit()
     this.hooks.onChanged(meetingId)
@@ -623,21 +787,25 @@ export class MeetingManager {
 
   private async reclusterMeeting(meetingId: string, embeddings: Map<number, Float32Array>, prints: Active['prints']): Promise<void> {
     let row = store.getMeetingRow(meetingId)
+    if (!row) return
+    const paths = store.trackPaths(row)
+    const hasAudio = paths.some(([, p]) => p && existsSync(p))
     // 旧声纹模型录的会议（升级前异常中断）：临时录音还在就用当前模型重算全部声纹，否则不与声纹库比较（D-026）
-    if (row && !store.usesCurrentModel(meetingId)) {
-      if (row.audio_path && existsSync(row.audio_path) && speakerModel.ready()) {
+    if (!store.usesCurrentModel(meetingId)) {
+      if (hasAudio && speakerModel.ready()) {
         store.resetEmbeddings(meetingId)
         embeddings.clear()
-        row = store.getMeetingRow(meetingId)
+        row = store.getMeetingRow(meetingId)!
       } else prints = []
     }
     for (const [id, v] of store.segmentEmbeddings(meetingId)) if (!embeddings.has(id)) embeddings.set(id, v)
     const segments = store.listSegments(meetingId)
     // 缺声纹的句子（异常恢复、模型下载较晚）从临时录音补算
-    if (row?.audio_path && existsSync(row.audio_path) && speakerModel.ready()) {
+    if (speakerModel.ready()) {
       for (const s of segments) {
-        if (embeddings.has(s.id) || samplesToMs(s.endSample - s.startSample) < MIN_EMBED_MS) continue
-        const v = await diarizer.embed(row.audio_path, s.startSample, s.endSample - s.startSample)
+        const path = paths.find(([tr]) => tr === s.track)?.[1]
+        if (!path || !existsSync(path) || embeddings.has(s.id) || samplesToMs(s.endSample - s.startSample) < MIN_EMBED_MS) continue
+        const v = await diarizer.embed(path, s.startSample, s.endSample - s.startSample)
         if (v) {
           embeddings.set(s.id, v)
           store.setSegmentEmbedding(s.id, v)
@@ -645,53 +813,64 @@ export class MeetingManager {
       }
     }
     if (!embeddings.size) return
-    // 还没有说话人的句子先在线归类，再整体重新归类
-    const online = new OnlineClusterer()
-    const speakers = store.listSpeakers(meetingId)
-    for (const s of segments) {
-      const v = embeddings.get(s.id)
-      if (v && s.speakerId !== null) online.seed(s.speakerId, v)
-    }
-    for (const s of segments) {
-      const v = embeddings.get(s.id)
-      if (v && s.speakerId === null) {
-        const { key } = online.assign(v, () => store.addSpeaker(meetingId), row?.expected_speakers ?? Infinity)
-        store.setSegmentSpeaker(s.id, key)
-        s.speakerId = key
-      }
-    }
-    // 同一声纹被认出两次：先合并
-    const byPrint = new Map<number, number>()
-    for (const sp of speakers) {
+    // 同一声纹被认出两次（同一路里）：先合并
+    const byPrint = new Map<string, number>()
+    for (const sp of store.listSpeakers(meetingId)) {
       if (!sp.voiceprint_id) continue
-      const first = byPrint.get(sp.voiceprint_id)
+      const key = `${sp.track}:${sp.voiceprint_id}`
+      const first = byPrint.get(key)
       if (first) store.mergeSpeakers(sp.id, first)
-      else byPrint.set(sp.voiceprint_id, sp.id)
+      else byPrint.set(key, sp.id)
     }
-    const means = this.applyRegroup(meetingId, embeddings, prints, row?.expected_speakers ?? null, null)
-    // 保存每人的声音特征（D-016：用于会后“记住这个声音”）；已关联声纹的人顺带更新声纹
     const counts = new Map<number, number>()
     for (const s of store.listSegments(meetingId)) if (s.speakerId !== null && embeddings.has(s.id)) counts.set(s.speakerId, (counts.get(s.speakerId) ?? 0) + 1)
-    for (const sp of store.listSpeakers(meetingId)) {
-      const c = means.get(sp.id)
-      if (!c) continue
-      store.updateSpeaker(sp.id, { centroid: c })
-      if (sp.voiceprint_id && sp.name) {
-        const vp = prints.find((p) => p.id === sp.voiceprint_id)
-        const n = counts.get(sp.id) ?? 0
-        if (vp && n) store.saveVoiceprint({ id: vp.id, name: vp.name, vector: blendVoiceprint(vp.vector, vp.samples, c, n), samples: vp.samples + n })
+    for (const [track] of paths) {
+      const expected = store.expectedOf(row, track)
+      // 还没有说话人的句子先在线归类，再整体重新归类（每一路各自进行）
+      const online = new OnlineClusterer()
+      const trackSegs = segments.filter((s) => s.track === track)
+      for (const s of trackSegs) {
+        const v = embeddings.get(s.id)
+        if (v && s.speakerId !== null) online.seed(s.speakerId, v)
+      }
+      for (const s of trackSegs) {
+        const v = embeddings.get(s.id)
+        if (v && s.speakerId === null) {
+          const { key } = online.assign(v, () => store.addSpeaker(meetingId, track), expected ?? Infinity)
+          store.setSegmentSpeaker(s.id, key)
+          s.speakerId = key
+        }
+      }
+      const means = this.applyRegroup(meetingId, track, embeddings, prints, expected ?? null, null)
+      // 保存每人的声音特征（D-016：用于会后“记住这个声音”）；已关联声纹的人顺带更新声纹
+      for (const sp of store.listSpeakers(meetingId)) {
+        const c = means.get(sp.id)
+        if (!c || sp.track !== track) continue
+        store.updateSpeaker(sp.id, { centroid: c })
+        if (sp.voiceprint_id && sp.name) {
+          const vp = prints.find((p) => p.id === sp.voiceprint_id)
+          const n = counts.get(sp.id) ?? 0
+          if (vp && n) store.saveVoiceprint({ id: vp.id, name: vp.name, vector: blendVoiceprint(vp.vector, vp.samples, c, n), samples: vp.samples + n })
+        }
       }
     }
     store.relabelSpeakers(meetingId) // 「说话人 N」按出场顺序重新编号
   }
 
   /**
-   * 整体重新区分说话人并写回：段的归属、被合并的说话人、按声纹库认名字；live 时同步重建在线归类器。
+   * 整体重新区分某一路的说话人并写回：段的归属、被合并的说话人、按声纹库认名字；live 时同步重建这一路的在线归类器。
    * 返回每个说话人的平均向量；有改动时返回值的 changed 标记见调用方（live 用于决定是否刷新界面）。
    */
-  private applyRegroup(meetingId: string, embeddings: Map<number, Float32Array>, prints: Active['prints'], expected: number | null, live: Active | null): Map<number, Float32Array> & { changed?: boolean } {
-    const segs = store.listSegments(meetingId)
-    const named = new Set(store.listSpeakers(meetingId).filter((s) => s.name).map((s) => s.id))
+  private applyRegroup(
+    meetingId: string,
+    track: MeetingTrack,
+    embeddings: Map<number, Float32Array>,
+    prints: Active['prints'],
+    expected: number | null,
+    live: Track | null
+  ): Map<number, Float32Array> & { changed?: boolean } {
+    const segs = store.listSegments(meetingId).filter((s) => s.track === track)
+    const named = new Set(store.listSpeakers(meetingId).filter((s) => s.name && s.track === track).map((s) => s.id))
     const items: ClusterItem[] = segs.map((s) => ({
       id: s.id,
       speaker: s.speakerId,
@@ -699,7 +878,7 @@ export class MeetingManager {
       durMs: samplesToMs(s.endSample - s.startSample),
       locked: s.locked
     }))
-    const result = regroup(items, { expected, named, create: () => store.addSpeaker(meetingId) })
+    const result = regroup(items, { expected, named, create: () => store.addSpeaker(meetingId, track) })
     let changed = false
     for (const s of segs) {
       const target = result.assign.get(s.id)
@@ -709,13 +888,13 @@ export class MeetingManager {
       }
     }
     store.pruneSpeakers(meetingId)
-    // 还没有名字的人：用整组声音按声纹库认（D-022；本场已用过的声纹不再给别人；旧声纹模型的会议不认，D-026）
+    // 还没有名字的人：用整组声音按声纹库认（D-022；本场已用过的声纹不再给别人，两路一起算；旧声纹模型的会议不认，D-026）
     if (!store.usesCurrentModel(meetingId)) prints = []
     const speakers = store.listSpeakers(meetingId)
     const taken = new Set(speakers.flatMap((sp) => (sp.voiceprint_id ? [sp.voiceprint_id] : [])))
     const groups = speakers.flatMap((sp) => {
       const mean = result.means.get(sp.id)
-      return !sp.name && mean ? [{ key: sp.id, mean, n: result.sizes.get(sp.id) ?? 0 }] : []
+      return !sp.name && sp.track === track && mean ? [{ key: sp.id, mean, n: result.sizes.get(sp.id) ?? 0 }] : []
     })
     for (const [key, id] of identifySpeakers(groups, prints, taken)) {
       const vp = prints.find((p) => p.id === id)
@@ -736,9 +915,9 @@ export class MeetingManager {
     return Object.assign(result.means, { changed })
   }
 
-  private speakerVector(meetingId: string, speakerId: number): Float32Array | null {
+  private speakerVector(meetingId: string, track: MeetingTrack, speakerId: number): Float32Array | null {
     if (this.active?.id === meetingId) {
-      const c = this.active.clusterer.centroid(speakerId)
+      const c = this.track(this.active, track)?.clusterer.centroid(speakerId)
       if (c) return c
     }
     return store.getSpeaker(speakerId)?.centroid ?? null
@@ -800,7 +979,24 @@ function defaultTitle(ts: number): string {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 的会议`
 }
 
-/** 按块读取 pcm 文件中的一段（样本） */
+/**
+ * 麦克风一路 [start, end) 去掉外放回声后保留的段（D-033）：与应用声音同一时刻（前后各多取一点，容许延迟与两路误差）比较。
+ * 应用声音还没写到的部分按无声处理。
+ */
+function echoFree(micPath: string, appPath: string, start: number, end: number): Part[] {
+  try {
+    const mic = readRange(micPath, start, end)
+    const from = start - ECHO_LEAD
+    const appPcm = new Int16Array(end + ECHO_AHEAD - from)
+    const got = readRange(appPath, Math.max(0, from), end + ECHO_AHEAD)
+    appPcm.set(got.subarray(0, appPcm.length - Math.max(0, -from)), Math.max(0, -from))
+    return removeEcho(start, start + mic.length, mic, appPcm).keep
+  } catch (err) {
+    console.warn('[meeting] echo check failed:', err)
+    return [{ start, end }]
+  }
+}
+
 /** 读出临时录音 [start, end) 这段（文件比 end 短时只返回已有部分） */
 function readRange(path: string, start: number, end: number): Int16Array {
   const pcm = new Int16Array(Math.max(0, end - start))

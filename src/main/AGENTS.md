@@ -22,7 +22,7 @@
 | `updater.ts` / `update-info.ts` | 在线更新（D-028）：electron-updater 检查 / 下载 / 重启安装与状态推送 / 发布地址与错误提示（纯逻辑） |
 | `build-info.ts` | 版本信息 `appInfo`：package.json 版本 + 打包时注入的构建号与提交（`electron.vite.config.ts` 的 define） |
 | `wav.ts` / `tray-icon.ts` | PCM → WAV；托盘模板图（由 `scripts/gen-tray-icon.py` 生成） |
-| `meeting/` | 会议模式（D-015、D-016）：`segmenter.ts` 按停顿分句、`cluster.ts` 说话人聚类与声纹匹配、`minutes.ts` 转写稿与纪要提示词（以上纯逻辑）；`store.ts` 会议/说话人/句子/声纹存储；`diarizer.ts` 声纹模型下载与 `mt-diarize` 进程；`index.ts` 编排 `MeetingManager` |
+| `meeting/` | 会议模式（D-015、D-016）：`segmenter.ts` 按停顿分句与两路对齐、`cluster.ts` 说话人聚类与声纹匹配、`minutes.ts` 转写稿与纪要提示词、`echo.ts` 外放回声去除（以上纯逻辑）；`app-audio.ts` 线上会议的应用声音（`mt-audiotap` 进程、应用列表、开会前授权，D-033）；`store.ts` 会议/说话人/句子/声纹存储；`diarizer.ts` 声纹模型下载与 `mt-diarize` 进程；`index.ts` 编排 `MeetingManager` |
 
 ## 可复制范例
 
@@ -42,8 +42,8 @@
 - API Key 只经 `config.ts` 的 `getKey`/`setKey` 读写，不写入 `settings.json`、日志或历史（D-002）。`getKey` 会访问钥匙串（自签名版本每装一个新包首次访问都会弹授权框）：只在真正调用云端服务前调用；判断有无 Key、显示掩码用 `hasKey`/`keyMask`（不解密）。
 - 所有网络请求都要有超时（`AbortSignal.timeout`）。
 - 内置引擎只在 127.0.0.1 监听；识别请求必须显式传 `language`（whisper-server 默认强制英文）；不要按请求改 `audio_ctx`；不要加“使用简体中文和中文标点”之类的风格提示词（实测会让英文语音被翻译、出现幻觉、耗时翻 4～20 倍），标点交给 `text.ts` 规整。
-- 被 `test/` 导入的模块（`polish.ts`、`providers/asr.ts`、`whisper/catalog.ts`、`whisper/download.ts`、`live.ts`、`learn.ts`、`meeting/segmenter.ts`、`meeting/cluster.ts`、`meeting/minutes.ts`、`update-info.ts`）不能 import `electron`，也不能用 TS 参数属性；它们之间互相导入时写 `.ts` 扩展名（Node 原生剥离类型不解析无扩展名路径）。
-- 会议：临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。会议进行中 `session.setBlocker` 拦下听写。
+- 被 `test/` 导入的模块（`polish.ts`、`providers/asr.ts`、`whisper/catalog.ts`、`whisper/download.ts`、`live.ts`、`learn.ts`、`meeting/segmenter.ts`、`meeting/cluster.ts`、`meeting/minutes.ts`、`meeting/echo.ts`、`update-info.ts`）不能 import `electron`，也不能用 TS 参数属性；它们之间互相导入时写 `.ts` 扩展名（Node 原生剥离类型不解析无扩展名路径）。
+- 会议：临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。会议进行中 `session.setBlocker` 拦下听写。线上会议（D-033）按“路”（`Track`：0 = 麦克风 / 现场，1 = 应用声音 / 线上）各自分句、区分说话人、算人数；两路的说话人不能互相合并或改归属；麦克风那一路识别前先 `echoFree` 去掉外放回声；用应用声音前必须先 `prepareAppAudio`（授权后系统会重启应用，不能在会议中途发生）。
 
 ## 依赖与影响面
 

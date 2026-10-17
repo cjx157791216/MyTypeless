@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC } from '../shared/types'
+import { IPC, type MeetingTrack } from '../shared/types'
 import type { AnswerPayload } from '../shared/api'
 
 /**
@@ -81,7 +81,9 @@ const api = {
     saveMinutes: (id: string, markdown: string) => ipcRenderer.invoke(IPC.meetingSaveMinutes, id, markdown),
     regenerate: (id: string) => ipcRenderer.invoke(IPC.meetingRegenerate, id),
     finish: (id: string, opts?: { minutes?: boolean }) => ipcRenderer.invoke(IPC.meetingFinish, id, opts),
-    setExpected: (id: string, n: number) => ipcRenderer.invoke(IPC.meetingSetExpected, id, n),
+    setExpected: (id: string, n: number, track?: MeetingTrack) => ipcRenderer.invoke(IPC.meetingSetExpected, id, n, track),
+    audioApps: () => ipcRenderer.invoke(IPC.meetingAudioApps),
+    prepareAppAudio: () => ipcRenderer.invoke(IPC.meetingPrepareAppAudio),
     exportMarkdown: (id: string) => ipcRenderer.invoke(IPC.meetingExport, id),
     onLive: (cb: (live: unknown) => void) => {
       const listener = (_e: unknown, live: unknown) => cb(live)

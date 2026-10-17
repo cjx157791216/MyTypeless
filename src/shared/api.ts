@@ -1,6 +1,7 @@
 // preload 暴露给渲染端的 API 类型（与 src/preload/index.ts 保持一致）
 import type {
   AppInfo,
+  AudioApp,
   FeatureMode,
   HistoryRecord,
   HistoryStats,
@@ -8,6 +9,7 @@ import type {
   MeetingLive,
   MeetingStartOptions,
   MeetingSummary,
+  MeetingTrack,
   ModelInfo,
   ModelProgress,
   UpdateState,
@@ -87,7 +89,12 @@ export interface MyTypelessBridge {
     saveMinutes(id: string, markdown: string): Promise<void>
     regenerate(id: string): Promise<{ ok: boolean; error?: string }>
     finish(id: string, opts?: { minutes?: boolean }): Promise<{ ok: boolean; error?: string }>
-    setExpected(id: string, n: number): Promise<{ ok: boolean; error?: string }>
+    /** 改某一路（0 = 现场 / 1 = 线上，默认 0）的人数并立即重新区分说话人 */
+    setExpected(id: string, n: number, track?: MeetingTrack): Promise<{ ok: boolean; error?: string }>
+    /** 可截取声音的应用（D-033）；supported = false 表示系统低于 macOS 14.2 */
+    audioApps(): Promise<{ supported: boolean; apps: AudioApp[] }>
+    /** 开会前先完成「录制系统音频」授权；waiting = 系统授权框还没回应 */
+    prepareAppAudio(): Promise<'ready' | 'waiting' | 'unsupported'>
     exportMarkdown(id: string): Promise<boolean>
     onLive(cb: (live: MeetingLive) => void): () => void
     onChanged(cb: (meetingId: string) => void): () => void

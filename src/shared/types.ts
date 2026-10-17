@@ -93,11 +93,27 @@ export interface Settings {
   learnFromEdits: boolean // 写入后追踪修改、学习改正的词（只读刚插入的那段，D-012）
   learnFrequentTerms: boolean // 统计常用英文专有名词并加入词典（D-012）
   appMode: AppMode // 主窗口当前模式：个人（听写）/ 会议（D-015、D-017）
-  meetingSpeakers: number // 上次开会选的参会人数（托盘开会也用它；D-021）
+  meetingSpeakers: number // 上次开会选的参会人数（托盘开会也用它；D-021）；麦克风 + 应用声音时为现场人数
+  meetingSource: MeetingSource // 上次开会选的声音来源（D-033）
+  meetingApp: string // 上次截取声音的应用 bundleId；空 = 全部系统声音
+  meetingRemoteSpeakers: number // 上次选的线上人数（应用声音里有几个人）
   autoCheckUpdates: boolean // 启动后与每 6 小时检查一次新版本（只读发布地址的版本说明，D-028）
 }
 
 export type AppMode = 'personal' | 'meeting'
+
+/** 会议的声音来源（D-033）：只用麦克风 / 麦克风 + 会议软件的声音 / 只用会议软件的声音 */
+export type MeetingSource = 'mic' | 'mixed' | 'app'
+/** 会议录音的一路：0 = 麦克风（现场），1 = 应用声音（线上） */
+export type MeetingTrack = 0 | 1
+
+/** 可截取声音的正在运行的应用（mt-audiotap --apps） */
+export interface AudioApp {
+  bundleId: string
+  name: string
+  audio: boolean // 已连接音频（开过声音）
+  output: boolean // 此刻正在发声
+}
 
 /** 应用版本信息：version 来自 package.json；build 为打包时间 YYYYMMDD.HHmm（开发运行为 dev）；commit 为 git 短哈希 */
 export interface AppInfo {
@@ -126,7 +142,8 @@ export type MeetingStatus = 'recording' | 'paused' | 'processing' | 'done' | 'in
 
 export interface MeetingSpeaker {
   id: number
-  label: number // 「说话人 N」的 N
+  label: number // 「说话人 N」的 N（每一路各自编号）
+  track: MeetingTrack
   name: string | null // 用户起的名字或声纹认出的名字
   voiceprintId: number | null // 已保存的声纹（记住这个声音）
   displayName: string // name ?? 说话人 N
@@ -136,7 +153,8 @@ export interface MeetingSpeaker {
 export interface MeetingSegment {
   id: number
   speakerId: number | null // null = 尚未区分
-  startMs: number // 会议录音时间线（暂停不计）
+  track: MeetingTrack
+  startMs: number // 会议录音时间线（暂停不计；两路对齐到同一时间线）
   endMs: number
   text: string
   locked: boolean // 用户手动指定过说话人
@@ -154,7 +172,10 @@ export interface MeetingSummary {
 }
 
 export interface MeetingDetail extends MeetingSummary {
-  expectedSpeakers: number | null
+  source: MeetingSource
+  appName: string | null // 截取声音的应用（全部系统声音时为“系统声音”）
+  expectedSpeakers: number | null // 麦克风这一路（现场）的人数
+  expectedRemote: number | null // 应用声音这一路（线上）的人数
   speakerList: MeetingSpeaker[]
   segments: MeetingSegment[]
   minutes: string | null // Markdown
@@ -176,7 +197,11 @@ export interface MeetingLive {
 
 export interface MeetingStartOptions {
   title?: string
-  expectedSpeakers?: number | null
+  expectedSpeakers?: number | null // 现场（麦克风）人数
+  source?: MeetingSource
+  appBundleId?: string // 空 = 全部系统声音
+  appName?: string
+  expectedRemote?: number | null // 线上（应用声音）人数
 }
 
 export interface Voiceprint {
@@ -292,7 +317,9 @@ export const IPC = {
   meetingMergeSpeakers: 'mt:meeting-merge-speakers', // (meetingId, fromId, intoId)
   meetingSaveMinutes: 'mt:meeting-save-minutes',
   meetingRegenerate: 'mt:meeting-regenerate', // 重新生成纪要
-  meetingSetExpected: 'mt:meeting-set-expected', // (id, n)：改参会人数并立即按新人数重新区分说话人
+  meetingSetExpected: 'mt:meeting-set-expected', // (id, n, track?)：改参会人数（现场 / 线上）并立即按新人数重新区分说话人
+  meetingAudioApps: 'mt:meeting-audio-apps', // → { supported, apps }：可截取声音的应用（D-033）
+  meetingPrepareAppAudio: 'mt:meeting-prepare-app-audio', // → 'ready' | 'waiting' | 'unsupported'：开会前先完成「录制系统音频」授权
   meetingFinish: 'mt:meeting-finish', // 整理异常中断的会议（id, { minutes?: boolean }）
   meetingExport: 'mt:meeting-export', // 导出 Markdown（保存对话框）
   voiceprintList: 'mt:voiceprint-list',

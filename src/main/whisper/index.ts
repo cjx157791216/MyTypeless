@@ -5,7 +5,7 @@ import { LocalWhisperAsr, type AsrProvider } from '../providers/asr'
 import { convertChineseScript } from '../native'
 import { SherpaHelper } from '../sherpa-helper'
 import { findModel, hasHan, recommendedModelId, resolveLanguage, resolveScript } from './catalog'
-import { fixAsrCase, normalizeChinesePunctuation } from '../text'
+import { fixAsrCase, normalizeChinesePunctuation, stripAsrTokens } from '../text'
 import { WhisperEngine } from './engine'
 import { ModelManager } from './models'
 
@@ -82,7 +82,7 @@ export function createBuiltinAsr(settings: Settings): AsrProvider {
         const raw = await engine.transcribe(wavToPcm(wav))
         if (raw === null) throw new Error('LOCAL_ASR_FAILED')
         // FireRedASR2 的英文全大写、不支持热词：按词典与常见缩写恢复大小写（D-027）
-        let text = fixAsrCase(raw, opts?.vocabulary ?? [])
+        let text = fixAsrCase(stripAsrTokens(raw), opts?.vocabulary ?? [])
         if (hasHan(text)) {
           if (script !== 'off') text = await convertChineseScript(text, script)
           text = normalizeChinesePunctuation(text)

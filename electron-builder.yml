@@ -26,6 +26,9 @@ mac:
   hardenedRuntime: false
   entitlements: build/entitlements.plist
   darkModeSupport: true
+  # 线上会议截取会议软件的声音（D-033，Core Audio process tap）：系统授权框里显示的用途说明；麦克风沿用 Electron 默认
+  extendInfo:
+    NSAudioCaptureUsageDescription: 线上会议时转写会议软件里对方的声音（只在本机处理，不上传）
   target:
     - target: dmg
       arch:

@@ -60,6 +60,10 @@
 | 平均相似度（平均链接） | `SAME_SPEAKER`、`regroup` | 一段与某人每段声纹相似度的平均值，“是不是同一个人”统一用它判断（门槛 0.55）；会议中定期与结束时用它按参会人数整体重新归类 | D-019、D-021 |
 | 会议纪要 | `minutes` | 会后由 LLM 生成的 Markdown：头部本地生成，正文五节 | D-015 |
 | 临时录音 | `meetings.audio_path`（`userData/meetings/*.pcm`） | 会议期间保存在本机的录音，整理完删除 | D-016 |
+| 应用声音 | `mt-audiotap`、`AppAudioCapture`、`meetings.app_audio_path` | 会议软件等其他应用播放出来的声音（线上会议里对方的声音），由 Core Audio process tap 截取，会议期间临时保存在本机 | D-033 |
+| 声音来源 | `MeetingSource`（`mic` / `mixed` / `app`）、`meetingSource` | 会议录哪里的声音：只用麦克风 / 麦克风 + 会议软件 / 只用会议软件的声音 | D-033 |
+| 现场 / 线上（一路） | `MeetingTrack`（0 / 1）、`track` 列 | 会议录音的一路：麦克风为现场，应用声音为线上；每一路各自区分说话人、各有人数（线上人数 `expected_remote`） | D-033 |
+| 外放回声 | `removeEcho`、`ECHO_CORR` | 外放时麦克风再录到的对方声音；按时间-频谱包络与同一时刻的应用声音比较后去掉 | D-033 |
 | 在线更新 | `updater.ts`、`UpdateState`、`autoCheckUpdates` | 检查发布地址的新版本 → 提示 → 用户确认后应用内下载 → 重启更新 | D-028 |
 | 发布地址 | `DEFAULT_UPDATE_URL`、`MT_UPDATE_URL` | 存放版本说明与安装包的公开地址（代码仓库 cjx157791216/MyTypeless 的最新 Release；旧版本读取 mytypeless-releases） | D-032 |
 | 版本说明 | `latest-mac.yml` | 发布地址上描述最新版本的文件：版本号、构建号、zip 地址与 sha512、更新内容；由 `npm run release` 生成上传 | D-028 |

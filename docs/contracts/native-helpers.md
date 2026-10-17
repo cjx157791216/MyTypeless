@@ -61,6 +61,23 @@ whisper.cpp（MIT）`whisper-server` 的静态编译版，由 `scripts/build-whi
 - 生命周期：会议中按需启动；闲置 2 分钟退出；stdin 关闭即退出；退出码 2 参数错误、4 模型加载失败
 - 只读取传入的录音文件，不写任何文件、不联网
 
+## mt-audiotap（常驻，应用声音截取，D-033）
+
+`native/audiotap-helper.swift`（原创）用 Core Audio process tap（macOS 14.2+）截取其他应用播放的声音，挂在以默认输出设备为时钟的私有聚集设备上。由 `src/main/meeting/app-audio.ts` 管理（线上会议的应用声音一路）。
+
+| 调用 | 行为 |
+| --- | --- |
+| `mt-audiotap --list` | stdout：有音频连接的进程 `[{"pid","bundleId","name","output"}]`（`output`：此刻正在发声） |
+| `mt-audiotap --apps` | stdout：正在运行的普通应用 `[{"bundleId","name","audio","output"}]`（`audio`：它或它的辅助进程连过音频；`output`：此刻正在发声），供开会时选择 |
+| `mt-audiotap --probe` | 建立截取后立即退出：stderr 输出 `{"ready":true,...}` 即已能截取。首次使用时系统先弹「录制系统音频」授权框，回应前不输出；用户允许后 macOS 会退出并重新打开启动它的 app——主进程在开会前用它完成授权 |
+| `mt-audiotap [--bundle <前缀>]... [--pid <pid>]... [--exclude-bundle <前缀>]... [--exclude-pid <pid>]... [--mute] [--verbose]` | stdout 连续输出 16kHz 单声道 s16le（没人发声时输出静音，时间线与真实时间一致）；不给 `--bundle` / `--pid` 时截取全部系统声音（排除 `--exclude-*` 与自身）；给了则只截取 bundleId 以该前缀开头（Chrome 网页的声音来自 `com.google.Chrome.helper`）或该 pid 的进程；系统的音频进程列表一变就重新匹配（另每 2 秒检查一次）；`--mute`：被截取的声音不再从扬声器播放（测试用） |
+
+- stderr 每行一条 JSON：就绪 `{"ready":true,"rate":<设备采样率>,"channels":2}`；匹配到的进程变化 `{"processes":[pid,...]}`；输出设备采样率变化 `{"rate":...}`；换了输出设备（插拔耳机、连蓝牙，整个截取重建，期间按真实时间补静音）`{"device":"名称"}`；`--verbose` 时每 2 秒 `{"peak":<0～32767>}`；错误 `{"error":"..."}`
+- 权限：「系统音频录制」，归属启动它的 app（需要该 app 的 Info.plist 带 `NSAudioCaptureUsageDescription`）；授权框回应前停在启动阶段；拒绝过时系统不再询问、只给静音、不报错，调用方按长时间纯静音提示去系统设置
+- 退出码：2 参数错误；4 系统低于 14.2 / 建立 tap 或聚集设备失败；收到 SIGTERM、stdout 关闭或父进程退出时清理并退出（0）
+- 实现约束：IOProc 直接在音频线程回调（交给 dispatch queue 会跳过 IO 周期，声音变短）；按聚集设备的实际采样率重采样（tap 报的格式不准）；输出严格 16000 样本/秒（与麦克风录音放在同一时间线）
+- 只把声音写到 stdout，不写文件、不联网
+
 ## mt-focus（一次性）
 
 | 调用 | 行为 |

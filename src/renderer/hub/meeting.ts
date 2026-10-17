@@ -1,8 +1,9 @@
-import type { MeetingDetail, MeetingLive, MeetingSegment, MeetingSummary } from '../../shared/types'
+import type { AudioApp, MeetingDetail, MeetingLive, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingSummary, MeetingTrack } from '../../shared/types'
 import { renderMarkdown } from '../../shared/markdown'
 import { $, api, escapeHtml, fmtClock, fmtDate, fmtDuration, fmtTime, hidePopover, showPopover, showPopoverContent, speakerColor, toast, type PopoverItem } from './util'
 
 // 会议页（D-015）：会议列表 / 开始会议 / 会议详情（实时转写、说话人纠正、纪要）
+// 线上会议（D-033）：声音来源三选一；麦克风 + 会议软件时分「现场」「线上」两路，各自的人数与说话人
 
 type Tab = 'minutes' | 'transcript' | 'speakers'
 
@@ -56,13 +57,24 @@ const STATUS_TEXT: Record<MeetingSummary['status'], string> = {
 /** 参会人数选项（D-021：只按人数区分说话人，不自动判断人数） */
 const SPEAKER_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 10]
 
+let startInited = false
+let appsSupported = true
+
 async function loadList(): Promise<void> {
   const meetings = await api.meeting.list()
-  const sel = $('meeting-speakers') as HTMLSelectElement
-  if (!sel.options.length) {
-    for (const n of SPEAKER_COUNTS) sel.add(new Option(`参会 ${n} 人`, String(n)))
-    sel.value = String((await api.settings.get()).meetingSpeakers || 2)
-  }
+  if (!startInited) {
+    startInited = true
+    const s = await api.settings.get()
+    for (const [id, n] of [['meeting-speakers', s.meetingSpeakers], ['meeting-remote', s.meetingRemoteSpeakers]] as const) {
+      const sel = $(id) as HTMLSelectElement
+      for (const c of SPEAKER_COUNTS) sel.add(new Option(String(c), String(c)))
+      sel.value = String(n || 2)
+    }
+    ;($('meeting-source') as HTMLSelectElement).value = s.meetingSource || 'mic'
+    await loadApps(s.meetingApp ?? '')
+  } else await loadApps(($('meeting-app') as HTMLSelectElement).value)
+  updateSourceUi()
+  void prepareAppAudio()
   renderStartCard()
   const box = $('meeting-interrupted')
   box.innerHTML = ''
@@ -109,6 +121,60 @@ async function loadList(): Promise<void> {
   }
 }
 
+/** 可截取声音的应用：常见会议软件在前；最后是「全部系统声音」 */
+async function loadApps(selected: string): Promise<void> {
+  const { supported, apps } = await api.meeting.audioApps()
+  appsSupported = supported
+  const sel = $('meeting-app') as HTMLSelectElement
+  sel.innerHTML = ''
+  for (const a of apps) sel.add(appOption(a))
+  sel.add(new Option('全部系统声音', ''))
+  sel.value = apps.some((a) => a.bundleId === selected) || selected === '' ? selected : (apps[0]?.bundleId ?? '')
+  const source = $('meeting-source') as HTMLSelectElement
+  for (const o of Array.from(source.options)) if (o.value !== 'mic') o.disabled = !supported
+  if (!supported) source.value = 'mic'
+}
+
+function appOption(a: AudioApp): HTMLOptionElement {
+  const o = new Option(a.output ? `${a.name}（正在发声）` : a.name, a.bundleId)
+  o.dataset.name = a.name
+  return o
+}
+
+/** 按声音来源显示应用与人数选择 */
+function updateSourceUi(): void {
+  const source = ($('meeting-source') as HTMLSelectElement).value as MeetingSource
+  const local = $('meeting-speakers') as HTMLSelectElement
+  const remote = $('meeting-remote') as HTMLSelectElement
+  $('meeting-app').classList.toggle('hidden', source === 'mic')
+  local.classList.toggle('hidden', source === 'app')
+  remote.classList.toggle('hidden', source === 'mic')
+  for (const o of Array.from(local.options)) o.text = source === 'mixed' ? `现场 ${o.value} 人` : `参会 ${o.value} 人`
+  for (const o of Array.from(remote.options)) o.text = source === 'mixed' ? `线上 ${o.value} 人` : `参会 ${o.value} 人`
+  $('meeting-source-hint').textContent = !appsSupported
+    ? '截取会议软件的声音需要 macOS 14.2 或更新版本'
+    : source === 'mixed'
+      ? '现场的人走麦克风，会议软件里的人走软件的声音，分开区分说话人。建议戴耳机：外放时对方的声音会被麦克风再录一遍（重复的部分会自动去掉）。首次使用时系统会请求「录制系统音频」权限。'
+      : source === 'app'
+        ? '只转写会议软件播放出来的声音（对方的声音），你自己说的话不会被录下。首次使用时系统会请求「录制系统音频」权限。'
+        : ''
+}
+
+$('meeting-source').addEventListener('change', async () => {
+  // 切到会议软件时刷新正在运行的应用（不在下拉框展开时刷新：重建选项会把展开的下拉框关掉）
+  if (($('meeting-source') as HTMLSelectElement).value !== 'mic') await loadApps(($('meeting-app') as HTMLSelectElement).value)
+  updateSourceUi()
+  void prepareAppAudio()
+})
+
+/** 选了会议软件的声音：先完成「录制系统音频」授权（允许后 MyTypeless 会被系统重新打开，必须在开会前） */
+async function prepareAppAudio(): Promise<void> {
+  if (($('meeting-source') as HTMLSelectElement).value === 'mic') return
+  if ((await api.meeting.prepareAppAudio()) === 'waiting') {
+    $('meeting-source-hint').textContent = '请在系统弹出的对话框里允许 MyTypeless 录制系统音频；允许后 MyTypeless 会自动重新打开，再开始会议即可。'
+  }
+}
+
 function renderStartCard(): void {
   const busy = live.state !== 'idle'
   const btn = $('btn-meeting-start') as HTMLButtonElement
@@ -125,8 +191,16 @@ function renderStartCard(): void {
 
 $('btn-meeting-start').addEventListener('click', async () => {
   const title = ($('meeting-title') as HTMLInputElement).value.trim()
-  const n = Number(($('meeting-speakers') as HTMLSelectElement).value) || 2
-  const r = await api.meeting.start({ title, expectedSpeakers: n })
+  const source = ($('meeting-source') as HTMLSelectElement).value as MeetingSource
+  const appSel = $('meeting-app') as HTMLSelectElement
+  const r = await api.meeting.start({
+    title,
+    source,
+    expectedSpeakers: Number(($('meeting-speakers') as HTMLSelectElement).value) || 2,
+    expectedRemote: Number(($('meeting-remote') as HTMLSelectElement).value) || 2,
+    appBundleId: appSel.value,
+    appName: appSel.value ? (appSel.selectedOptions[0]?.dataset.name ?? appSel.value) : '系统声音'
+  })
   if (!r.ok) {
     $('meeting-start-state').textContent = r.error ?? '无法开始会议'
     return
@@ -176,6 +250,7 @@ function renderDetail(): void {
   $('meeting-detail-meta').textContent = [
     `${fmtDate(d.startedAt)} ${fmtTime(d.startedAt)}`,
     d.durationMs ? fmtDuration(d.durationMs) : '',
+    d.source === 'mixed' ? `现场 + ${d.appName ?? '会议软件'}` : d.source === 'app' ? (d.appName ?? '会议软件') : '',
     d.speakerList.length ? `${d.speakerList.length} 位说话人` : '',
     STATUS_TEXT[d.status]
   ]
@@ -196,32 +271,25 @@ function renderSpeakerBar(): void {
   const bar = $('speaker-bar')
   const d = detail!
   bar.innerHTML = ''
-  for (const sp of d.speakerList) {
-    const chip = speakerChip(sp.id)
-    const count = document.createElement('span')
-    count.className = 'count'
-    count.textContent = ` · ${sp.segmentCount}`
-    chip.appendChild(count)
-    bar.appendChild(chip)
+  // 每一路：说话人 + 人数（麦克风 + 会议软件时分现场、线上两组）
+  const tracks: MeetingTrack[] = d.source === 'mixed' ? [0, 1] : d.source === 'app' ? [1] : [0]
+  for (const track of tracks) {
+    if (d.source === 'mixed') {
+      const label = document.createElement('span')
+      label.className = 'track-label'
+      label.textContent = track === 0 ? '现场' : `线上（${d.appName ?? '会议软件'}）`
+      bar.appendChild(label)
+    }
+    for (const sp of d.speakerList.filter((x) => x.track === track)) {
+      const chip = speakerChip(sp.id)
+      const count = document.createElement('span')
+      count.className = 'count'
+      count.textContent = ` · ${sp.segmentCount}`
+      chip.appendChild(count)
+      bar.appendChild(chip)
+    }
+    bar.appendChild(countSelect(d, track))
   }
-  // 参会人数：随时改，立即按新人数重新区分（D-020）
-  const count = document.createElement('select')
-  count.className = 'count-select'
-  count.title = '改参会人数后立即按新人数重新区分说话人'
-  if (!d.expectedSpeakers) {
-    const unset = new Option('人数：未设置', '')
-    unset.disabled = true
-    count.add(unset)
-  }
-  for (const n of SPEAKER_COUNTS) count.add(new Option(`${n} 人`, String(n)))
-  count.value = d.expectedSpeakers ? String(d.expectedSpeakers) : ''
-  count.addEventListener('change', async () => {
-    const n = Number(count.value)
-    if (!n) return
-    const r = await api.meeting.setExpected(d.id, n)
-    toast(r.ok ? `已按 ${n} 人重新区分说话人` : r.error ?? '无法重新区分', r.ok ? 2200 : 4000)
-  })
-  bar.appendChild(count)
   const hint = document.createElement('span')
   hint.className = 'hint'
   const model = live.speakerModel
@@ -238,9 +306,40 @@ function renderSpeakerBar(): void {
   bar.appendChild(hint)
 }
 
+/** 某一路的人数：随时改，立即按新人数重新区分（D-020、D-033） */
+function countSelect(d: MeetingDetail, track: MeetingTrack): HTMLSelectElement {
+  const expected = track === 1 ? d.expectedRemote : d.expectedSpeakers
+  const count = document.createElement('select')
+  count.className = 'count-select'
+  count.title = '改人数后立即按新人数重新区分说话人'
+  if (!expected) {
+    const unset = new Option('人数：未设置', '')
+    unset.disabled = true
+    count.add(unset)
+  }
+  for (const n of SPEAKER_COUNTS) count.add(new Option(`${n} 人`, String(n)))
+  count.value = expected ? String(expected) : ''
+  count.addEventListener('change', async () => {
+    const n = Number(count.value)
+    if (!n) return
+    const r = await api.meeting.setExpected(d.id, n, track)
+    toast(r.ok ? `已按 ${n} 人重新区分说话人` : r.error ?? '无法重新区分', r.ok ? 2200 : 4000)
+  })
+  return count
+}
+
+/** 说话人颜色：线上的人从调色板后半段取，与现场同号的人不同色 */
+function colorOf(sp: Pick<MeetingSpeaker, 'label' | 'track'> | undefined): string {
+  return speakerColor(sp ? sp.label + (sp.track === 1 ? 4 : 0) : null)
+}
+
+function speakerOf(id: number | null): MeetingSpeaker | undefined {
+  return id === null ? undefined : detail?.speakerList.find((s) => s.id === id)
+}
+
 /** 说话人标签（点击改名或合并） */
 function speakerChip(speakerId: number | null): HTMLButtonElement {
-  const color = speakerColor(speakerLabel(speakerId))
+  const color = colorOf(speakerOf(speakerId))
   const chip = document.createElement('button')
   chip.className = 'speaker-chip'
   chip.style.color = color
@@ -266,7 +365,7 @@ function renamePopover(anchor: HTMLElement, speakerId: number): void {
   title.textContent = `「${sp.displayName}」叫什么名字？`
   const input = document.createElement('input')
   input.type = 'text'
-  input.placeholder = `说话人 ${sp.label}`
+  input.placeholder = defaultName(sp)
   input.value = sp.name ?? ''
   const remember = document.createElement('label')
   remember.className = 'check'
@@ -289,14 +388,14 @@ function renamePopover(anchor: HTMLElement, speakerId: number): void {
     if (e.key === 'Enter') void submit()
   })
   form.append(title, input, remember, actions)
-  const others = d.speakerList.filter((s) => s.id !== sp.id)
+  const others = d.speakerList.filter((s) => s.id !== sp.id && s.track === sp.track)
   if (others.length) {
     form.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }))
     form.appendChild(Object.assign(document.createElement('div'), { className: 'title', textContent: '其实是同一个人？合并到' }))
     for (const o of others) {
       const b = document.createElement('button')
       const dot = document.createElement('i')
-      dot.style.background = speakerColor(o.label)
+      dot.style.background = colorOf(o)
       b.append(dot, document.createTextNode(o.displayName))
       b.addEventListener('click', () => {
         hidePopover()
@@ -308,6 +407,12 @@ function renamePopover(anchor: HTMLElement, speakerId: number): void {
   showPopoverContent(anchor, form)
   input.focus()
   input.select()
+}
+
+/** 没起名字时的默认名（与主进程 displayName 一致） */
+function defaultName(sp: MeetingSpeaker): string {
+  if (detail?.source !== 'mixed') return `说话人 ${sp.label}`
+  return `${sp.track === 1 ? '线上' : '现场'} ${sp.label}`
 }
 
 /** “记住这个声音”默认勾选；只有用户之前命名时明确取消过（有名字但没有声纹）才默认不勾 */
@@ -360,11 +465,6 @@ function speakerName(id: number | null): string {
   return detail?.speakerList.find((s) => s.id === id)?.displayName ?? '未区分'
 }
 
-function speakerLabel(id: number | null): number | null {
-  if (id === null) return null
-  return detail?.speakerList.find((s) => s.id === id)?.label ?? null
-}
-
 function renderTranscript(): void {
   const box = $('transcript')
   const scroller = content()
@@ -379,7 +479,7 @@ function renderTranscript(): void {
   const turns: Array<{ speakerId: number | null; segs: MeetingSegment[] }> = []
   for (const s of d.segments) {
     const last = turns.at(-1)
-    if (last && last.speakerId === s.speakerId) last.segs.push(s)
+    if (last && last.speakerId === s.speakerId && last.segs[0].track === s.track) last.segs.push(s)
     else turns.push({ speakerId: s.speakerId, segs: [s] })
   }
   for (const t of turns) {
@@ -413,8 +513,8 @@ function segmentMenu(anchor: HTMLElement, seg: MeetingSegment): void {
   const d = detail!
   const items: PopoverItem[] = [{ header: '这句话是谁说的' }]
   for (const s of d.speakerList) {
-    if (s.id === seg.speakerId) continue
-    items.push({ label: s.displayName, color: speakerColor(s.label), onClick: () => void api.meeting.assignSegment(d.id, seg.id, s.id) })
+    if (s.id === seg.speakerId || s.track !== seg.track) continue
+    items.push({ label: s.displayName, color: colorOf(s), onClick: () => void api.meeting.assignSegment(d.id, seg.id, s.id) })
   }
   items.push('sep', { label: '新的说话人', onClick: () => void api.meeting.assignSegment(d.id, seg.id, 'new') })
   showPopover(anchor, items)
@@ -440,10 +540,10 @@ function renderSpeakers(): void {
     row.className = 'speaker-row'
     const dot = document.createElement('i')
     dot.className = 'dot'
-    dot.style.background = speakerColor(sp.label)
+    dot.style.background = colorOf(sp)
     const input = document.createElement('input')
     input.type = 'text'
-    input.placeholder = `说话人 ${sp.label}`
+    input.placeholder = defaultName(sp)
     input.value = sp.name ?? ''
     input.dataset.speakerInput = String(sp.id)
     const remember = document.createElement('label')
@@ -468,8 +568,9 @@ function renderSpeakers(): void {
     })
     const mergeSel = document.createElement('select')
     mergeSel.innerHTML = '<option value="">合并到…</option>'
-    for (const o of d.speakerList) if (o.id !== sp.id) mergeSel.add(new Option(o.displayName, String(o.id)))
-    mergeSel.disabled = d.speakerList.length < 2
+    const peers = d.speakerList.filter((o) => o.id !== sp.id && o.track === sp.track)
+    for (const o of peers) mergeSel.add(new Option(o.displayName, String(o.id)))
+    mergeSel.disabled = !peers.length
     mergeSel.addEventListener('change', () => {
       const into = Number(mergeSel.value)
       mergeSel.value = ''

@@ -184,7 +184,7 @@ test('download: 所有源都失败时报 NETWORK', async () => {
 })
 
 // —— 文本规整 ——
-import { normalizeChinesePunctuation, joinText, isHallucination } from '../src/main/text.ts'
+import { normalizeChinesePunctuation, joinText, isHallucination, stripAsrTokens } from '../src/main/text.ts'
 
 test('normalizeChinesePunctuation: 中文语境下英文标点转中文标点，不误伤数字/网址/英文', () => {
   assert.equal(
@@ -211,4 +211,13 @@ test('isHallucination：静音/噪声上的典型幻觉整段丢弃，正常内�
   assert.equal(isHallucination('[BLANK_AUDIO]'), true)
   assert.equal(isHallucination('谢谢你帮我改字幕'), false)
   assert.equal(isHallucination('明天下午三点开会'), false)
+})
+
+test('stripAsrTokens：去掉 FireRedASR2 的特殊记号（静音 < sil > 等），只剩标点时为空', () => {
+  assert.equal(stripAsrTokens('< sil >。'), '')
+  assert.equal(stripAsrTokens('<sil>'), '')
+  assert.equal(stripAsrTokens('嗯< sil >我们开始吧。'), '嗯我们开始吧。')
+  assert.equal(stripAsrTokens('<unk> 好的'), '好的')
+  assert.equal(stripAsrTokens('a < b 的时候'), 'a < b 的时候')
+  assert.equal(stripAsrTokens('明天下午三点开会。'), '明天下午三点开会。')
 })

@@ -23,6 +23,15 @@ export function normalizeChinesePunctuation(text: string): string {
     .replace(new RegExp(`([，。？！：；])\\s+(?=${HAN})`, 'gu'), '$1')
 }
 
+/**
+ * 去掉识别结果里模型的特殊记号：FireRedASR2 在噪声、静音上会输出 `< sil >`（静音）、`<unk>` 等；
+ * 去掉后只剩标点（标点模型给空结果补的句号）时返回空串，调用方按“没有识别到内容”处理
+ */
+export function stripAsrTokens(text: string): string {
+  const out = text.replace(/<\s*(sil|unk|blank|noise|s|\/s)\s*>/gi, '').replace(/\s{2,}/g, ' ').trim()
+  return /[\p{L}\p{N}]/u.test(out) ? out : ''
+}
+
 /** whisper 系模型在静音/噪声上的典型幻觉输出（多来自视频字幕训练数据）；命中的整段丢弃 */
 const HALLUCINATIONS = [
   /^(谢谢观看|谢谢收看|感谢观看|谢谢大家|谢谢)[。！!.]?$/,

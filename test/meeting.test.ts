@@ -1,7 +1,7 @@
 // 会议模式（D-015）：分句、说话人聚类、纪要整理、Markdown 展示
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MEETING_VAD_DENOISED, UtteranceSegmenter, planFeed, samplesToMs, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
+import { ALIGN_TOLERANCE, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, planFeed, samplesToMs, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
 import { readFileSync } from 'node:fs'
 import { OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
 import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown } from '../src/main/meeting/minutes.ts'
@@ -401,4 +401,15 @@ test('句内按窗口找换人（真人短句模拟接话）：比整句归一�
   const parts = splitByWindows(0, 12000 + seq.length * 8000, wins, 16000)
   assert.equal(parts.length, 2, `切成 ${parts.length} 段`)
   assert.ok(Math.abs(parts[0].end - (12000 + 3.5 * 8000)) <= 8000, `切点 ${parts[0].end}`)
+})
+
+test('两路对齐（D-033）：落后会议时间线超过容差才补静音，补到与时间线对齐', () => {
+  // 刚开始：应用声音晚到 1 秒，第一块 0.1 秒
+  assert.equal(alignPad(0, 1600, 16000 + 1600), 16000)
+  // 正常采集的抖动（落后不到 0.25 秒）不补
+  assert.equal(alignPad(16000, 1600, 16000 + 1600 + ALIGN_TOLERANCE - 1), 0)
+  // 进程重启的缺口：补齐
+  assert.equal(alignPad(32000, 1600, 64000), 64000 - 32000 - 1600)
+  // 比时间线超前（采集早到一点）：不动
+  assert.equal(alignPad(20000, 1600, 16000), 0)
 })

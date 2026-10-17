@@ -255,3 +255,15 @@ export function planFeed(fed: number, r: { at: number; pcm: Int16Array } | null,
   if (end > fed) steps.push({ pcm: r.pcm.subarray(fed - r.at, end - r.at) })
   return steps
 }
+
+/** 两路录音（麦克风 + 应用声音，D-033）允许落后会议时间线的样本数：超过才补静音 */
+export const ALIGN_TOLERANCE = SAMPLE_RATE / 4
+
+/**
+ * 两路录音对齐到同一条会议时间线：target = 按真实时间此刻应录到的样本数（暂停不计）。
+ * 这一路写入 chunk 后仍落后超过 tolerance（刚开始或继续时采集晚到、应用声音进程重启）时，返回先补的静音样本数。
+ */
+export function alignPad(written: number, chunk: number, target: number, tolerance = ALIGN_TOLERANCE): number {
+  const behind = target - (written + chunk)
+  return behind > tolerance ? Math.round(behind) : 0
+}

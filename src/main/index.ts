@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Tray, M
 import { execFile, execFileSync } from 'child_process'
 import { appendFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { IPC, type SessionProgress, type Settings, type FeatureMode, type MeetingLive, type MeetingStartOptions } from '../shared/types'
+import { IPC, type SessionProgress, type Settings, type FeatureMode, type MeetingLive, type MeetingStartOptions, type MeetingTrack } from '../shared/types'
 import type { PermissionStatus } from '../shared/api'
 import { loadSettings, saveSettings, hasKey, keyMask, setKey, maskKey } from './config'
 import { DictationSessionManager } from './session'
@@ -19,6 +19,7 @@ import { appInfo, versionLabel } from './build-info'
 import * as updater from './updater'
 import { stopTracking } from './learner'
 import { MeetingManager, meetingStore } from './meeting'
+import { appAudioSupported, listAudioApps, prepareAppAudio } from './meeting/app-audio'
 import { denoiser, diarizer } from './meeting/diarizer'
 import { buildTranscript, exportMarkdown } from './meeting/minutes'
 
@@ -552,7 +553,9 @@ function registerIpc(): void {
     onMeetingChanged(id)
   })
   ipcMain.handle(IPC.meetingRegenerate, (_e, id: string) => meeting.regenerate(id))
-  ipcMain.handle(IPC.meetingSetExpected, (_e, id: string, n: number) => meeting.setExpected(id, n))
+  ipcMain.handle(IPC.meetingSetExpected, (_e, id: string, n: number, track?: MeetingTrack) => meeting.setExpected(id, n, track === 1 ? 1 : 0))
+  ipcMain.handle(IPC.meetingAudioApps, async () => ({ supported: appAudioSupported(), apps: await listAudioApps() }))
+  ipcMain.handle(IPC.meetingPrepareAppAudio, () => prepareAppAudio())
   ipcMain.handle(IPC.meetingFinish, (_e, id: string, opts?: { minutes?: boolean }) => meeting.finish(id, opts ?? {}))
   ipcMain.handle(IPC.meetingExport, async (e, id: string) => {
     const d = meetingStore.getMeetingDetail(id)

@@ -40,3 +40,4 @@
 | GAP-019 | P1 / `DONE_PENDING_REVIEW` | 每人发言总结与会议纪要：生成、编辑、导出 Markdown、重新生成 | D-015 | 单测（转写稿、分段、头部、导出、Markdown 展示）；未配 LLM 的路径已验证；真实 LLM 生成未测（测试环境无 Key），待 MEET-008、009、011 |
 | GAP-020 | P1 / `DONE_PENDING_REVIEW` | 在线更新：检查新版本、确认后应用内下载、重启更新、发布脚本；v0.2.1 已发布（旧发布仓库与代码仓库）；版本改发到代码仓库（D-032），待从 0.2.1 经旧发布仓库在线更新到下一个版本 | D-028、D-029、D-032 | 单测 `test/update.test.ts`；打包版本机端到端见[运行记录](../_history/agent-runs/2026-10-17-online-update.md)；待 RELE-004～007 用真实发布地址通过 |
 | GAP-021 | P1 / `DONE_PENDING_REVIEW` | 开源：清理逆向资料与他人产品引用、补 LICENSE / README（中英）/ CONTRIBUTING / SECURITY / 行为准则 / Issue 与 PR 模板 / CI，在 GitHub 以清理后的快照建仓库；待负责人审阅后设为公开 | D-030 | [运行记录](../_history/agent-runs/2026-10-17-open-source.md) |
+| GAP-022 | P1 / `DONE_PENDING_REVIEW` | 线上会议：声音来源三选一、截取会议软件的声音（mt-audiotap）、现场 / 线上两路各自区分说话人、外放回声去除、开会前授权 | D-033 | 单测 `test/echo.test.ts`、`test/meeting.test.ts`；打包版真机外放端到端（Chrome + 系统朗读）见[运行记录](../_history/agent-runs/2026-10-17-meeting-app-audio.md)；待 MEET-020～025 用真实会议软件通话通过 |
