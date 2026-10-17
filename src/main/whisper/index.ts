@@ -81,7 +81,7 @@ export function createBuiltinAsr(settings: Settings): AsrProvider {
       async transcribe(wav, opts) {
         const raw = await engine.transcribe(wavToPcm(wav))
         if (raw === null) throw new Error('LOCAL_ASR_FAILED')
-        // FireRedASR2 的英文全大写、不支持热词：按词典与常见缩写恢复大小写（D-027）
+        // 静音时输出 <sil> 等特殊标记；英文全大写、不支持热词：按词典与常见缩写恢复大小写（D-027）
         let text = fixAsrCase(stripAsrTokens(raw), opts?.vocabulary ?? [])
         if (hasHan(text)) {
           if (script !== 'off') text = await convertChineseScript(text, script)

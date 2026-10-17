@@ -23,15 +23,6 @@ export function normalizeChinesePunctuation(text: string): string {
     .replace(new RegExp(`([，。？！：；])\\s+(?=${HAN})`, 'gu'), '$1')
 }
 
-/**
- * 去掉识别结果里模型的特殊记号：FireRedASR2 在噪声、静音上会输出 `< sil >`（静音）、`<unk>` 等；
- * 去掉后只剩标点（标点模型给空结果补的句号）时返回空串，调用方按“没有识别到内容”处理
- */
-export function stripAsrTokens(text: string): string {
-  const out = text.replace(/<\s*(sil|unk|blank|noise|s|\/s)\s*>/gi, '').replace(/\s{2,}/g, ' ').trim()
-  return /[\p{L}\p{N}]/u.test(out) ? out : ''
-}
-
 /** whisper 系模型在静音/噪声上的典型幻觉输出（多来自视频字幕训练数据）；命中的整段丢弃 */
 const HALLUCINATIONS = [
   /^(谢谢观看|谢谢收看|感谢观看|谢谢大家|谢谢)[。！!.]?$/,
@@ -45,6 +36,20 @@ const HALLUCINATIONS = [
 export function isHallucination(text: string): boolean {
   const t = text.trim()
   return HALLUCINATIONS.some((re) => re.test(t))
+}
+
+/**
+ * 去掉 FireRedASR2 输出里的特殊标记（静音时输出 <sil>，还有 <unk> 等；标点模型会把它拆成“< sil >”并补上“。”）。
+ * 去掉后只剩标点/空白的整段为空，开头残留的标点一并去掉。
+ */
+export function stripAsrTokens(text: string): string {
+  const out = text
+    .replace(/\s*<\s*[A-Za-z_][\w-]*\s*>\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(new RegExp(`(?<=${HAN}|[，。！？、；：]) | (?=${HAN}|[，。！？、；：])`, 'gu'), '')
+    .trim()
+  if (!/[\p{L}\p{N}]/u.test(out)) return ''
+  return out.replace(/^[\s，。！？、；：,.!?;:]+/u, '')
 }
 
 /** 常见缩写：识别结果里保持全大写 */

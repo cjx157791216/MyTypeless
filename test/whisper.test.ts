@@ -213,11 +213,13 @@ test('isHallucination：静音/噪声上的典型幻觉整段丢弃，正常内�
   assert.equal(isHallucination('明天下午三点开会'), false)
 })
 
-test('stripAsrTokens：去掉 FireRedASR2 的特殊记号（静音 < sil > 等），只剩标点时为空', () => {
+test('stripAsrTokens：去掉 FireRedASR2 的特殊标记（<sil> 等，标点模型会拆成 < sil >）；只剩标点时为空', () => {
   assert.equal(stripAsrTokens('< sil >。'), '')
   assert.equal(stripAsrTokens('<sil>'), '')
-  assert.equal(stripAsrTokens('嗯< sil >我们开始吧。'), '嗯我们开始吧。')
-  assert.equal(stripAsrTokens('<unk> 好的'), '好的')
-  assert.equal(stripAsrTokens('a < b 的时候'), 'a < b 的时候')
+  assert.equal(stripAsrTokens('<unk>，<sil>。'), '')
+  assert.equal(stripAsrTokens('你好< sil >世界。'), '你好世界。')
+  assert.equal(stripAsrTokens('< sil >，明天开会。'), '明天开会。')
+  assert.equal(stripAsrTokens('HELLO <sil> WORLD'), 'HELLO WORLD')
   assert.equal(stripAsrTokens('明天下午三点开会。'), '明天下午三点开会。')
+  assert.equal(stripAsrTokens('3 < 5 > 2'), '3 < 5 > 2')
 })

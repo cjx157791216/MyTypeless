@@ -85,7 +85,7 @@ npm run docs:check
 - 打包版隔离实例测试的 `--user-data-dir` 必须带空格（如 `/tmp/mt smoke/ud`）：真实数据目录 `~/Library/Application Support/` 含空格，给子进程的按行命令里路径必须放在行尾（曾因路径被空格截断，真实会议的声纹全部失败而测试全过）。
 - 识别引擎 `mt-whisper`（whisper-server）不随父进程退出：应用启动时 `killOrphanEngines` 清理父进程已是 launchd 的残留。
 - VAD（`live.ts` 的 `Vad`，听写与会议共用）阈值下限 250（远处、外放的人声只有 300 左右）；底噪只能贴着最安静的帧更新：让非语音帧都参与平均会被说话中较轻的部分抬高，把下一句正常音量的话当成静音（真人录音实测漏掉整句）。
-- 内置识别有两个引擎（D-027）：中文/英文默认 FireRedASR2（mt-diarize `--firered`，CPU，每句 1～2.5 秒），其他语言用 Whisper（mt-whisper）。FireRedASR2 输出**不带标点、英文全大写、不支持热词**：标点靠 `--punct` 标点模型，大小写靠 `text.ts` 的 `fixAsrCase`（按词典恢复）；换识别模型要用人工标注的公开数据（WenetSpeech test_meeting、AISHELL-1、ASCEND）在本机实测错字率，不要拿某个模型的输出当参考答案。听写录音经 `asr` 命令的 base64 传入，不能写临时文件（D-002）。
+- 内置识别有两个引擎（D-027）：中文/英文默认 FireRedASR2（mt-diarize `--firered`，CPU，每句 1～2.5 秒），其他语言用 Whisper（mt-whisper）。FireRedASR2 输出**不带标点、英文全大写、不支持热词**，静音时输出特殊标记 `<sil>`（标点模型会变成 `< sil >。`，由 `text.ts` 的 `stripAsrTokens` 去掉）：标点靠 `--punct` 标点模型，大小写靠 `text.ts` 的 `fixAsrCase`（按词典恢复）；换识别模型要用人工标注的公开数据（WenetSpeech test_meeting、AISHELL-1、ASCEND）在本机实测错字率，不要拿某个模型的输出当参考答案。听写录音经 `asr` 命令的 base64 传入，不能写临时文件（D-002）。
 - Whisper 引擎：`language=auto` 会多跑一次编码器（耗时翻倍），默认按系统语言传 `zh` 等；缩小 `audio_ctx` 会让 turbo 模型输出乱码。模型在 `~/Library/Application Support/MyTypeless/models/`。
 - `electron-builder.yml` 的 `identity: null` 会让 electron-builder 完全跳过签名，由 `afterPack: scripts/sign-app.cjs` 补签：有本地证书（`scripts/setup-signing.sh`，存于 `.vendor/signing/`，`predist` 自动生成）就用证书签名，重新打包后系统授权仍有效；没有才退回 adhoc（每次打包都要重新授权）。不要删 `.vendor/signing/`，删了证书会变、所有授权失效。
 - 在线更新（D-028）按**版本号**判断新旧，不看构建号：发布前必须升级 `package.json` 的 `version`（`npm run release` 会拒绝不更大的版本）。自动安装要求新旧版本同一证书签名；应用不在「应用程序」文件夹（如直接从 DMG 运行）时 Squirrel 无法替换。开发运行不检查更新；测试用打包版 + `MT_UPDATE_URL=http://127.0.0.1:<端口>/latest` 指向本机临时服务器。
