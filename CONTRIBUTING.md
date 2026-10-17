@@ -15,6 +15,13 @@
 - 首次：`npm install` → `npm run native` → `npm run whisper` → `npm run diarize` → `npm run dev`
 - 开发模式下辅助功能 / 麦克风权限属于运行 `npm run dev` 的终端应用
 
+## 提交流程
+
+1. Fork 本仓库（维护者直接在本仓库开分支），从最新的 `main` 建分支：`feat/…`、`fix/…`、`docs/…`、`ci/…`。
+2. 改动尽量小而聚焦，一个 PR 只做一件事。
+3. 推送后向 `main` 提 PR，按模板写清楚改了什么、为什么、怎么验证。
+4. CI 通过、维护者审阅后以 squash 方式合并。
+
 ## 提交 PR 前
 
 ```bash
