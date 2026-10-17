@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'child_process'
+import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
 import { createServer } from 'net'
 import { cpus, setPriority } from 'os'
 import { helperPath } from '../native'
@@ -71,8 +71,10 @@ export class WhisperEngine {
     const bin = helperPath('mt-whisper')
     if (!bin) throw new Error('LOCAL_ENGINE_MISSING')
     const port = await freePort()
-    // 识别主要跑在 GPU（Metal）上，CPU 线程只负责解码：4 个足够，多了只会和其他工作抢核
-    const threads = String(Math.max(2, Math.min(4, Math.floor(cpus().length / 2))))
+    // macOS：识别主要跑在 GPU（Metal）上，CPU 线程只负责解码，4 个足够，多了只会和其他工作抢核。
+    // Windows 版只用 CPU（AVX2）：按物理核数（约逻辑核的一半）给，最多 8 个
+    const maxThreads = process.platform === 'darwin' ? 4 : 8
+    const threads = String(Math.max(2, Math.min(maxThreads, Math.floor(cpus().length / 2))))
     this.stderrTail = []
     const child = spawn(bin, ['-m', modelPath, '--host', '127.0.0.1', '--port', String(port), '-t', threads, '-l', 'auto'], {
       stdio: ['ignore', 'ignore', 'pipe']
@@ -133,11 +135,15 @@ function freePort(): Promise<number> {
 
 /**
  * 清理上次异常退出（崩溃、被强制结束）留下的识别引擎：whisper-server 不会随父进程退出，
- * 残留进程各占约 770MB 内存。只清理本应用 mt-whisper 路径、且父进程已是 launchd（pid 1）的进程。
+ * 残留进程各占约 770MB 内存。只清理本应用 mt-whisper 路径、且父进程已是 launchd（pid 1）的进程（Windows 见 killOrphanEnginesWin）。
  */
 export function killOrphanEngines(): number {
   const bin = helperPath('mt-whisper')
   if (!bin) return 0
+  if (process.platform === 'win32') {
+    killOrphanEnginesWin(bin)
+    return 0
+  }
   let killed = 0
   try {
     const out = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf-8' })
@@ -155,4 +161,27 @@ export function killOrphanEngines(): number {
     /* ps 不可用时忽略 */
   }
   return killed
+}
+
+/**
+ * Windows 没有“被 launchd 收养”：清理本应用 mt-whisper.exe 中父进程已不存在的。查询要起 PowerShell（约 1 秒），
+ * 放到后台做，不拖慢启动。父进程号被新进程复用时不会误杀（只会漏清一次）。
+ */
+function killOrphanEnginesWin(bin: string): void {
+  const script =
+    "Get-CimInstance Win32_Process -Filter \"Name='mt-whisper.exe'\" | " +
+    'Where-Object { -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | ' +
+    'ForEach-Object { \'{0}|{1}\' -f $_.ProcessId, $_.ExecutablePath }'
+  execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 15_000, windowsHide: true }, (err, stdout) => {
+    if (err) return
+    for (const line of stdout.split(/\r?\n/)) {
+      const [pid, path] = line.split('|')
+      if (!pid || path?.toLowerCase() !== bin.toLowerCase()) continue
+      try {
+        process.kill(Number(pid))
+      } catch {
+        /* 已退出 */
+      }
+    }
+  })
 }

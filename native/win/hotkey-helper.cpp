@@ -13,6 +13,9 @@
 // 父进程退出后立即退出。退出码：2 配置错误（或没有有效绑定）、4 安装钩子失败。
 #include "common.h"
 #include <tlhelp32.h>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <ctype.h>
 #include <stdlib.h>
 #include <map>
@@ -83,13 +86,17 @@ struct Parser {
     while (*p && *p != '"') {
       if (*p == '\\') {
         p++;
+        if (!*p) return false; // 结尾的 \：不能越过字符串结尾
         switch (*p) {
           case 'n': s += '\n'; break;
           case 't': s += '\t'; break;
           case 'r': s += '\r'; break;
           case 'u': {
             unsigned v = 0;
-            for (int i = 1; i <= 4; i++) v = v * 16 + (unsigned)(isdigit((unsigned char)p[i]) ? p[i] - '0' : (tolower((unsigned char)p[i]) - 'a' + 10));
+            for (int i = 1; i <= 4; i++) {
+              if (!isxdigit((unsigned char)p[i])) return false; // 不足 4 位或不是十六进制（也挡住了字符串结尾）
+              v = v * 16 + (unsigned)(isdigit((unsigned char)p[i]) ? p[i] - '0' : (tolower((unsigned char)p[i]) - 'a' + 10));
+            }
             p += 4;
             if (v < 0x80) s += (char)v;  // 配置只有 ASCII 键名，其他 \u 原样丢弃
             break;
@@ -207,10 +214,41 @@ static void SendMenuMask() {
   SendInput(2, in, sizeof(INPUT));
 }
 
+/**
+ * 事件输出：钩子安装后交给写入线程（WriterLoop）。钩子回调里同步写管道的话，管道一堵（主进程忙）回调就阻塞，
+ * 超过 LowLevelHooksTimeout 系统会静默卸掉钩子。安装钩子前（ready 之前）与 --replay 直接写。
+ */
+static std::mutex g_outLock;
+static std::condition_variable g_outReady;
+static std::deque<std::string> g_outQueue;
+static bool g_outAsync = false;
+
+static void WriteLine(const std::string &line) {
+  // 写不进去 = 主进程已经不在（管道断开）：退出，不留下没人接收的全局钩子
+  if (fwrite(line.data(), 1, line.size(), stdout) != line.size() || fflush(stdout) != 0) ExitProcess(0);
+}
+
+static DWORD WINAPI WriterLoop(LPVOID) {
+  for (;;) {
+    std::string line;
+    {
+      std::unique_lock<std::mutex> lk(g_outLock);
+      g_outReady.wait(lk, [] { return !g_outQueue.empty(); });
+      line = std::move(g_outQueue.front());
+      g_outQueue.pop_front();
+    }
+    WriteLine(line);
+  }
+}
+
 static void Emit(const std::string &name, const char *phase) {
   std::string line = "{\"name\":" + JsonString(name) + ",\"phase\":\"" + phase + "\"}\n";
-  fwrite(line.data(), 1, line.size(), stdout);
-  fflush(stdout);
+  if (!g_outAsync) return WriteLine(line);
+  {
+    std::lock_guard<std::mutex> g(g_outLock);
+    g_outQueue.push_back(std::move(line));
+  }
+  g_outReady.notify_one();
 }
 
 /** 本次事件生效后的物理按键状态 */
@@ -403,6 +441,27 @@ static LRESULT CALLBACK HookProc(int code, WPARAM wp, LPARAM lp) {
   return CallNextHookEx(g_hook, code, wp, lp);
 }
 
+/**
+ * 主进程（HotkeyWatcher）启动本助手时开着 stdin 管道：主进程退出（含崩溃）管道即关闭，读到结尾就退出。
+ * 不依赖父进程号（快照里的父进程号可能已被复用、也可能拿不到句柄），是 WatchParent 之外的兜底。
+ * 只在 stdin 是管道时生效（命令行直接运行时 stdin 是控制台 / NUL，不能据此退出）。
+ */
+static void ExitWhenStdinCloses() {
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  if (!in || in == INVALID_HANDLE_VALUE || GetFileType(in) != FILE_TYPE_PIPE) return;
+  CreateThread(
+      nullptr, 0,
+      [](LPVOID h) -> DWORD {
+        char buf[256];
+        DWORD got = 0;
+        while (ReadFile((HANDLE)h, buf, sizeof buf, &got, nullptr) && got) {
+          // 主进程不往 stdin 写东西；读到的内容丢弃
+        }
+        ExitProcess(0);
+      },
+      in, 0, nullptr);
+}
+
 /** 父进程退出后自行退出（主进程崩溃时不留下全局键盘钩子） */
 static DWORD WINAPI WatchParent(LPVOID) {
   DWORD self = GetCurrentProcessId(), parent = 0;
@@ -516,6 +575,7 @@ int wmain(int argc, wchar_t **argv) {
   for (int vk = 1; vk < 256; vk++) g_held[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
 
   CreateThread(nullptr, 0, WatchParent, nullptr, 0, nullptr);
+  ExitWhenStdinCloses();
   g_mainThread = GetCurrentThreadId();
   g_hook = SetWindowsHookExW(WH_KEYBOARD_LL, HookProc, GetModuleHandleW(nullptr), 0);
   if (!g_hook) {
@@ -523,6 +583,8 @@ int wmain(int argc, wchar_t **argv) {
     return 4;
   }
   Emit("system", "ready");
+  g_outAsync = true;
+  CreateThread(nullptr, 0, WriterLoop, nullptr, 0, nullptr);
   MSG msg;
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
     if (msg.message == WM_MT_MASK) {

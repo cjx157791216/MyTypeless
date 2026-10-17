@@ -12,6 +12,7 @@
     "native": "bash scripts/build-native.sh",
     "native:win": "node scripts/build-native-win.cjs",
     "diarize:win": "node scripts/build-native-win.cjs --diarize",
+    "whisper:win": "node scripts/build-whisper-win.cjs",
     "whisper": "bash scripts/build-whisper.sh",
     "diarize": "bash scripts/build-diarize.sh",
     "icon": "python3 scripts/gen-icon.py && cd build && iconutil -c icns icon.iconset -o icon.icns",

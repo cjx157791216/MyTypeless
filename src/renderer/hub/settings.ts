@@ -173,11 +173,6 @@ function renderModels(): void {
         button('使用', () => void useModel(m.id))
       }
       button('删除', () => void removeModel(m))
-    } else if (m.unsupported) {
-      const t = document.createElement('span')
-      t.className = 'hint'
-      t.textContent = m.unsupported
-      actions.appendChild(t)
     } else {
       button('下载', () => void api.models.download(m.id))
     }
@@ -215,15 +210,6 @@ function renderBanner(): void {
   if (justDone) {
     $('model-banner-title').textContent = '语音模型已就绪'
     $('model-banner-desc').textContent = '现在可以在任意输入框按住快捷键说话了，识别完全在本机进行。'
-    bar.classList.add('hidden')
-    btn.style.display = 'none'
-    state.textContent = ''
-    return
-  }
-  if (model.unsupported) {
-    // 所选语言只能用本平台没有的引擎（Windows 暂无 Whisper，GAP-008）：不引导下载
-    $('model-banner-title').textContent = '本平台暂不支持该语言的内置识别'
-    $('model-banner-desc').textContent = `「${model.label}」${model.unsupported}。请在设置里把识别语言改为中文或英文，或改用云端识别。`
     bar.classList.add('hidden')
     btn.style.display = 'none'
     state.textContent = ''

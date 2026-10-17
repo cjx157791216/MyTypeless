@@ -141,10 +141,14 @@ struct ClipItem {
   HENHMETAFILE emf{};  // CF_ENHMETAFILE
 };
 
-/** 备份剪贴板的全部格式（文字、富文本、图片、文件列表…），不只是纯文本 */
-static std::vector<ClipItem> SnapshotClipboard() {
-  std::vector<ClipItem> items;
-  if (!OpenClipboardRetry()) return items;
+/**
+ * 备份剪贴板的全部格式（文字、富文本、图片、文件列表…），不只是纯文本。
+ * 剪贴板一直被别的程序占着、打不开时返回 false——与“原本就是空的”（true + 空列表）区分开：
+ * 没备份成功就不能动剪贴板，否则事后“恢复”等于清空，用户原来的内容就丢了。
+ */
+static bool SnapshotClipboard(std::vector<ClipItem> &items) {
+  items.clear();
+  if (!OpenClipboardRetry()) return false;
   for (UINT f = EnumClipboardFormats(0); f; f = EnumClipboardFormats(f)) {
     // 由系统从其他格式合成、或不是内存块的格式：跳过（恢复 CF_DIB / CF_UNICODETEXT 后系统会再合成）
     if (f == CF_BITMAP || f == CF_PALETTE || f == CF_METAFILEPICT || f == CF_OWNERDISPLAY || f == CF_DSPBITMAP ||
@@ -164,7 +168,7 @@ static std::vector<ClipItem> SnapshotClipboard() {
     GlobalUnlock(h);
   }
   CloseClipboard();
-  return items;
+  return true;
 }
 
 static HGLOBAL GlobalFrom(const void *data, size_t size) {
@@ -226,7 +230,9 @@ static std::wstring ReadClipboardText() {
 }
 
 static bool PasteViaClipboard(const std::wstring &text) {
-  auto backup = SnapshotClipboard();
+  std::vector<ClipItem> backup;
+  // 备份不了就不粘贴：退出码 4，由主进程按写入失败处理（结果放进剪贴板并告诉用户，D-008），不悄悄覆盖用户的剪贴板
+  if (!SnapshotClipboard(backup)) return false;
   if (!WriteClipboardText(text)) return false;
   DWORD ours = GetClipboardSequenceNumber();
   Sleep_(50);
@@ -239,7 +245,8 @@ static bool PasteViaClipboard(const std::wstring &text) {
 
 /** Ctrl+C 抓取选中文本：等剪贴板序列号变化（最多约 600ms），读出后把剪贴板完整恢复 */
 static bool CopySelectedText(std::wstring &out) {
-  auto backup = SnapshotClipboard();
+  std::vector<ClipItem> backup;
+  if (!SnapshotClipboard(backup)) return false; // 备份不了就不复制：按“没有读到选区”处理
   DWORD before = GetClipboardSequenceNumber();
   if (!PostCombo("ctrl+c")) return false;
   bool changed = false;

@@ -4,6 +4,8 @@
 # 预编译包下载到 .vendor/sherpa-onnx/（GitHub Releases；网络慢时可手动下载后解压到该目录）。
 set -euo pipefail
 SHERPA_VERSION="v1.13.8"
+# 预编译包的 SHA256（GitHub Release 资源的官方摘要；换版本时一起更新）
+SHERPA_SHA256="1038a379fff5365b684e05cbbb9ab3577c1a2f6b1736a4d53a6746860d7eddd4"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$DIR/.vendor/sherpa-onnx"
 OUT="$DIR/native/bin"
@@ -21,6 +23,12 @@ if [ "$(cat "$VENDOR/VERSION" 2>/dev/null)" != "$SHERPA_VERSION" ]; then
   TMP="$(mktemp -d)"
   echo "下载 $NAME（约 230MB）…"
   curl -fL --retry 5 -C - -o "$TMP/pkg.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/$SHERPA_VERSION/$NAME.tar.bz2"
+  ACTUAL="$(shasum -a 256 "$TMP/pkg.tar.bz2" | cut -d' ' -f1)"
+  if [ "$ACTUAL" != "$SHERPA_SHA256" ]; then
+    rm -rf "$TMP"
+    echo "$NAME.tar.bz2 的 SHA256 不符：期望 $SHERPA_SHA256，实际 $ACTUAL" >&2
+    exit 1
+  fi
   tar xjf "$TMP/pkg.tar.bz2" -C "$TMP"
   rm -rf "$VENDOR"
   mkdir -p "$VENDOR"

@@ -1,13 +1,13 @@
 import { execFile } from 'child_process'
 import { clipboard, systemPreferences } from 'electron'
-import { injectWithHelper, helperPath } from './native'
+import { getSelectedTextAX, injectWithHelper, helperPath } from './native'
 
 /**
  * M2 文字注入：原生三级降级链（原创实现）
  * 1) CGEvent 键入（不污染剪贴板，原生 helper）
  * 2) 原生粘贴（写剪贴板 + Cmd+V + 完整恢复剪贴板）
  * 3) osascript 粘贴（历史兜底）
- * M3: captureSelectedText —— 原生 helper 模拟 Cmd+C 抓取选中文本（剪贴板完整恢复）
+ * M3: captureSelectedText —— 原生 helper 模拟 Cmd+C 抓取选中文本（剪贴板完整恢复）；Windows 先用 UI Automation 读
  * Windows：没有辅助功能授权；osascript 兜底只在 macOS 上有，助手缺失时写入失败，由会话把结果放进剪贴板（D-008）
  */
 
@@ -33,8 +33,16 @@ export async function openAccessibilitySettings(): Promise<void> {
   execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'])
 }
 
-/** 抓取当前选中文本；没有选中内容时返回 null */
+/**
+ * 抓取当前选中文本；没有选中内容时返回 null。
+ * Windows 先用 UI Automation 读（mt-focus --selected-text，不碰剪贴板），读不到再模拟 Ctrl+C：
+ * Ctrl+C 由目标应用写剪贴板，会进入 Win+V 剪贴板历史（开了云剪贴板还会上传）且无法标记排除，macOS 没有这种副作用。
+ */
 export async function captureSelectedText(): Promise<string | null> {
+  if (!isMac) {
+    const viaUia = await getSelectedTextAX()
+    if (viaUia) return viaUia
+  }
   const bin = helperPath('mt-inject')
   if (bin) {
     return new Promise((resolve) => {

@@ -44,7 +44,6 @@ export interface ModelInfo {
   sizeBytes: number
   recommended: boolean
   installed: boolean
-  unsupported?: string // 当前平台不能用的原因（如 Windows 暂无 Whisper 引擎，GAP-008）；能用时为空
 }
 
 export interface ModelProgress {

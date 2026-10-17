@@ -7,11 +7,11 @@
 | `hotkey-helper.swift` → `bin/mt-hotkey` | CGEventTap 全局快捷键：只匹配传入的绑定，stdout 输出 JSON 行事件 |
 | `inject-helper.swift` → `bin/mt-inject` | 写入：Unicode 键入 / 剪贴板粘贴（完整备份恢复）/ 组合键 / 抓选区 |
 | `text-helper.swift` → `bin/mt-text` | 繁简转换（系统 ICU） |
-| `bin/mt-whisper` | 内置识别引擎：whisper.cpp 的 whisper-server，由 `scripts/build-whisper.sh` 从源码静态编译（不是本目录的 Swift 源码） |
+| `bin/mt-whisper` | 内置识别引擎：whisper.cpp 的 whisper-server，由 `scripts/build-whisper.sh` 从源码静态编译（不是本目录的 Swift 源码）；Windows 版由 `scripts/build-whisper-win.cjs` 编译成 `mt-whisper.exe`（只用 CPU） |
 | `diarize-helper.c` → `bin/mt-diarize` | 会议声纹（D-015）：常驻，按行读命令，从会议临时录音取一段算声音特征；静态链接 sherpa-onnx / ONNX Runtime，由 `scripts/build-diarize.sh` 编译；Windows 用同一份源码（`_WIN32` 分支），由 `npm run diarize:win` 编译成 `mt-diarize.exe` |
 | `focus-helper.swift` → `bin/mt-focus` | 前台应用信息（bundleId、名称、pid），以及按 pid 激活应用 |
 | `audiotap-helper.swift` → `bin/mt-audiotap` | 线上会议截取会议软件播放的声音（Core Audio process tap，macOS 14.2+，D-033）：stdout 连续输出 16kHz 单声道 s16le；`--apps` 列应用、`--probe` 开会前完成授权 |
-| `win/` → `bin/mt-*.exe` | Windows 版助手（C++ + Win32，GAP-008）：`text-helper.cpp`、`focus-helper.cpp`、`inject-helper.cpp`、`hotkey-helper.cpp`，共用 `common.h`（UTF-8 转换、二进制 stdin/stdout、base64、JSON 转义）；`CMakeLists.txt` 由 `npm run native:win` 调用 |
+| `win/` → `bin/mt-*.exe` | Windows 版助手（C++ + Win32，GAP-008）：`text-helper.cpp`、`focus-helper.cpp`、`inject-helper.cpp`、`hotkey-helper.cpp`、`audiotap-helper.cpp`，共用 `process-info.h`（exe 路径与文件描述、父进程退出即退出）与 `common.h`（UTF-8 转换、二进制 stdin/stdout、base64、JSON 转义）；`CMakeLists.txt` 由 `npm run native:win` 调用 |
 | `bin/` | 编译产物（gitignore），打包时经 `extraResources` 放到 `Resources/bin/` |
 
 参数、输出和退出码以 [原生助手契约](../docs/contracts/native-helpers.md) 为准，改协议时先改契约，再同步 `src/main/native.ts`。
@@ -30,6 +30,7 @@
 - 单修饰键触发不吞 `flagsChanged`，避免修饰键状态卡死。
 - 无辅助功能权限一律 `exit(3)`；`mt-hotkey` 在父进程退出后自行退出。
 - `mt-audiotap` 的 IOProc 必须直接在音频线程调用（不给 dispatch queue，否则会跳过 IO 周期、声音变短）；音频线程只下混写入预分配缓冲；重采样按聚集设备的实际采样率（tap 报的格式不准，扬声器常是 44.1kHz）。
+- Windows 剪贴板：备份不了（被别的程序占着）就不能动剪贴板，否则事后“恢复”等于清空用户原来的内容；`SnapshotClipboard` 区分“备份失败”与“原本为空”。
 - Windows 版与 macOS 版协议完全一致（同名、带 `.exe`）；stdin/stdout 用二进制模式（换行不被转成 CRLF），文本一律 UTF-8；静态链接运行库，不依赖 VC++ 运行库。
 
 ## 依赖与影响面

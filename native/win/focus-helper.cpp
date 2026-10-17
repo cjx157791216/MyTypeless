@@ -5,56 +5,15 @@
 //   mt-focus --selected-text          → 焦点输入框中选中文字的 base64（UI Automation，不碰剪贴板）；没有选中 / 不支持 / 密码框退出码 5
 //   mt-focus --caret-context <前> <后> → {"text","caret","pid"}：光标前后各若干字符（自动词典追踪修改用，D-012）；
 //                                       只输出这一段；不支持 / 密码框退出码 5。两者在目标应用没响应时超时也按 5 处理
-#include "common.h"
+#include "process-info.h"
 #include <wctype.h>
 #include <ole2.h>  // common.h 定义了 WIN32_LEAN_AND_MEAN，UI Automation 需要的 OLE 定义要单独引入
 #include <UIAutomation.h>
 #include <wrl/client.h>
 
-#pragma comment(lib, "version.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
 using Microsoft::WRL::ComPtr;
-
-static std::wstring ExePath(DWORD pid) {
-  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-  if (!h) return {};
-  wchar_t buf[MAX_PATH * 2];
-  DWORD len = (DWORD)(sizeof buf / sizeof buf[0]);
-  std::wstring path;
-  if (QueryFullProcessImageNameW(h, 0, buf, &len)) path.assign(buf, len);
-  CloseHandle(h);
-  return path;
-}
-
-static std::wstring FileName(const std::wstring &path) {
-  size_t slash = path.find_last_of(L"\\/");
-  return slash == std::wstring::npos ? path : path.substr(slash + 1);
-}
-
-static std::wstring Lower(std::wstring s) {
-  for (auto &c : s) c = (wchar_t)towlower(c);
-  return s;
-}
-
-/** 程序的文件描述（版本信息里的 FileDescription）；没有时为空 */
-static std::wstring FileDescription(const std::wstring &path) {
-  DWORD size = GetFileVersionInfoSizeW(path.c_str(), nullptr);
-  if (!size) return {};
-  std::string data(size, '\0');
-  if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data())) return {};
-  struct Lang { WORD lang, codepage; } *langs = nullptr;
-  UINT bytes = 0;
-  if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", (void **)&langs, &bytes) || bytes < sizeof(Lang)) return {};
-  wchar_t key[64];
-  swprintf(key, 64, L"\\StringFileInfo\\%04x%04x\\FileDescription", langs[0].lang, langs[0].codepage);
-  wchar_t *desc = nullptr;
-  UINT chars = 0;
-  if (!VerQueryValueW(data.data(), key, (void **)&desc, &chars) || !desc || !chars) return {};
-  std::wstring s(desc);
-  while (!s.empty() && iswspace(s.back())) s.pop_back();
-  return s;
-}
 
 /** UWP 应用的顶层窗口属于 ApplicationFrameHost.exe：找出里面真正的应用进程 */
 static DWORD UwpChildPid(HWND frame, DWORD framePid) {
@@ -98,8 +57,7 @@ static int PrintFrontApp() {
     return 0;
   }
   std::wstring exe = FileName(path);
-  std::wstring name = FileDescription(path);
-  if (name.empty()) name = exe.size() > 4 && Lower(exe.substr(exe.size() - 4)) == L".exe" ? exe.substr(0, exe.size() - 4) : exe;
+  std::wstring name = DisplayName(path);
   WriteStdout("{\"bundleId\":" + JsonString(WideToUtf8(Lower(exe))) + ",\"name\":" + JsonString(WideToUtf8(name)) +
               ",\"pid\":" + std::to_string(pid) + "}\n");
   return 0;
@@ -146,6 +104,7 @@ struct UiaJob {
   bool caret = false;  // false：--selected-text；true：--caret-context
   int before = 0, after = 0;
   int code = 5;        // 默认“读不到”
+  bool password = false; // UI Automation 认出焦点是密码框：什么都不读，后备读取也跳过
   std::string out;
 };
 
@@ -194,7 +153,7 @@ static bool WakeChromiumAccessibility() {
   return true;
 }
 
-static bool FocusedTextPattern(IUIAutomation *uia, ComPtr<IUIAutomationTextPattern> &tp) {
+static bool FocusedTextPattern(IUIAutomation *uia, ComPtr<IUIAutomationTextPattern> &tp, bool &password) {
   bool chromium = false;
   for (int attempt = 0; attempt < 4; attempt++) {
     if (attempt == 1) chromium = WakeChromiumAccessibility();
@@ -203,8 +162,11 @@ static bool FocusedTextPattern(IUIAutomation *uia, ComPtr<IUIAutomationTextPatte
 
     ComPtr<IUIAutomationElement> el;
     if (FAILED(uia->GetFocusedElement(&el)) || !el) continue;
-    BOOL password = FALSE;
-    if (SUCCEEDED(el->get_CurrentIsPassword(&password)) && password) return false;
+    BOOL isPassword = FALSE;
+    if (SUCCEEDED(el->get_CurrentIsPassword(&isPassword)) && isPassword) {
+      password = true;
+      return false;
+    }
     if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, IID_PPV_ARGS(&tp))) && tp) return true;
   }
   return false;
@@ -276,7 +238,7 @@ static void ReadViaUia(UiaJob &job) {
   if (FAILED(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&uia))) || !uia) return;
   ComPtr<IUIAutomationTextPattern> tp;
   ComPtr<IUIAutomationTextRange> range;
-  if (!FocusedTextPattern(uia.Get(), tp) || !FirstSelection(tp.Get(), range)) return;
+  if (!FocusedTextPattern(uia.Get(), tp, job.password) || !FirstSelection(tp.Get(), range)) return;
 
   if (!job.caret) return Finish(job, RangeText(range.Get()), L"", L"");
 
@@ -298,7 +260,7 @@ static DWORD WINAPI UiaThread(LPVOID p) {
   auto &job = *(UiaJob *)p;
   ReadViaUia(job);
   // 有的编辑框（如 WinForms 文本框）经系统代理声称支持文本模式，读出来却是空的：再按标准编辑框直接读一次
-  if (job.code != 0) ReadEditControl(job);
+  if (job.code != 0 && !job.password) ReadEditControl(job);
   CoUninitialize();
   return 0;
 }

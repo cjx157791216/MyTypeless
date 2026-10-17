@@ -4,7 +4,7 @@ import type { Settings } from '../../shared/types'
 import { LocalWhisperAsr, type AsrProvider } from '../providers/asr'
 import { convertChineseScript } from '../native'
 import { SherpaHelper } from '../sherpa-helper'
-import { engineUnsupported, findModel, hasHan, recommendedModelId, resolveLanguage, resolveScript } from './catalog'
+import { findModel, hasHan, recommendedModelId, resolveLanguage, resolveScript } from './catalog'
 import { fixAsrCase, normalizeChinesePunctuation, stripAsrTokens } from '../text'
 import { WhisperEngine } from './engine'
 import { ModelManager } from './models'
@@ -38,11 +38,6 @@ export function selectedModelId(settings: Settings): string {
 /** 所选模型由哪个引擎运行 */
 export function selectedEngine(settings: Settings): 'whisper' | 'firered' {
   return findModel(selectedModelId(settings))?.engine ?? 'whisper'
-}
-
-/** 所选模型的引擎在当前平台不能用的原因（如 Windows 暂无 Whisper 引擎）；能用时为 undefined */
-export function builtinUnsupported(settings: Settings): string | undefined {
-  return engineUnsupported(selectedEngine(settings), process.platform)
 }
 
 /** 选中的模型是否已下载 */

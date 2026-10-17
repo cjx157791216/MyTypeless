@@ -71,14 +71,21 @@ static FILE *open_utf8(const char *path) {
 #define fseek(f, offset, origin) _fseeki64(f, (__int64)(offset), origin)
 
 /** 按 UTF-16 命令行重新取参数并转成 UTF-8（main 的 argv 是系统代码页，含中文的路径会丢字） */
+/** 失败（取不到命令行、内存不足）返回 NULL，调用方按参数错误退出 */
 static char **utf8_argv(int *argc) {
   wchar_t **wargv = CommandLineToArgvW(GetCommandLineW(), argc);
+  if (!wargv) return NULL;
   char **argv = calloc((size_t)*argc + 1, sizeof(char *));
-  for (int i = 0; wargv && argv && i < *argc; i++) {
+  for (int i = 0; argv && i < *argc; i++) {
     int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, NULL, 0, NULL, NULL);
-    argv[i] = malloc((size_t)n);
-    if (argv[i]) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, argv[i], n, NULL, NULL);
+    argv[i] = n > 0 ? malloc((size_t)n) : NULL;
+    if (!argv[i]) {
+      argv = NULL; // 已分配的部分随进程退出释放
+      break;
+    }
+    WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, argv[i], n, NULL, NULL);
   }
+  LocalFree(wargv);
   return argv;
 }
 #endif
@@ -373,6 +380,10 @@ static int embed(const SherpaOnnxSpeakerEmbeddingExtractor *ex, int32_t dim, con
 int main(int argc, char **argv) {
 #ifdef _WIN32
   argv = utf8_argv(&argc);
+  if (!argv) {
+    fprintf(stderr, "cannot read command line\n");
+    return 2;
+  }
   _setmode(_fileno(stdout), _O_BINARY); // 换行原样输出，不变成 CRLF
 #endif
   const char *model = NULL;
