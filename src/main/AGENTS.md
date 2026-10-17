@@ -11,7 +11,7 @@
 | `hotkeys.ts` | `HotkeyController`：绑定解析 `parseBinding`、原生优先、`globalShortcut` 兜底与重试 |
 | `live.ts` | 实时转写调度（纯逻辑，D-013）：VAD、停顿即识别、限频预览、长段定稿 |
 | `learn.ts` / `learner.ts` | 自动词典（D-012）：专有名词提取、修改比对（纯逻辑）/ 写入后追踪与计数 |
-| `text.ts` | 文本规整：中文标点、`joinText` |
+| `text.ts` | 文本规整：中文标点、`joinText`、幻觉过滤、FireRedASR2 特殊标记 `stripAsrTokens` 与大小写恢复 |
 | `key-press.ts` | 按键时序（纯逻辑）：按住说话 / 轻按免手持 / abort / 模式键（D-010） |
 | `native.ts` | `mt-*` 助手的路径解析与调用（`HotkeyWatcher`、`injectWithHelper`、`getFrontApp`） |
 | `inject.ts` | 写入降级链 `injectText`、抓选区 `captureSelectedText`、辅助功能权限 |

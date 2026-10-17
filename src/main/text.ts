@@ -38,6 +38,20 @@ export function isHallucination(text: string): boolean {
   return HALLUCINATIONS.some((re) => re.test(t))
 }
 
+/**
+ * 去掉 FireRedASR2 输出里的特殊标记（静音时输出 <sil>，还有 <unk> 等；标点模型会把它拆成“< sil >”并补上“。”）。
+ * 去掉后只剩标点/空白的整段为空，开头残留的标点一并去掉。
+ */
+export function stripAsrTokens(text: string): string {
+  const out = text
+    .replace(/\s*<\s*[A-Za-z_][\w-]*\s*>\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(new RegExp(`(?<=${HAN}|[，。！？、；：]) | (?=${HAN}|[，。！？、；：])`, 'gu'), '')
+    .trim()
+  if (!/[\p{L}\p{N}]/u.test(out)) return ''
+  return out.replace(/^[\s，。！？、；：,.!?;:]+/u, '')
+}
+
 /** 常见缩写：识别结果里保持全大写 */
 const KEEP_UPPER = new Set(
   'AI API APP AR ASR B2B CEO CFO COO CPU CTO CV GDP GPU HR ID IP IT KPI LLM MBA ML NBA NLP OK OKR PC PDF PM PPT PR QA QR ROI SDK SQL TTS TV UI URL USB UX VIP VR'.split(' ')
