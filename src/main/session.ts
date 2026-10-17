@@ -1,7 +1,7 @@
 import { BrowserWindow, clipboard, powerMonitor } from 'electron'
 import { IPC, type SessionProgress, type FeatureMode } from '../shared/types'
 import { createAsrProvider } from './providers/asr'
-import { LlmPolisher, llmTimeoutMs, localPreClean, type PolishTask } from './polish'
+import { hasSpokenContent, LlmPolisher, llmTimeoutMs, localPreClean, type PolishTask } from './polish'
 import { pcm16ToWav } from './wav'
 import { getKey, loadSettings } from './config'
 import { appendHistory, newRecord, listWords } from './history'
@@ -310,7 +310,8 @@ export class DictationSessionManager {
         rawText = await wholeFile()
       }
       if (stale()) return
-      if (!rawText || isHallucination(rawText)) {
+      // 没有实际内容（空、幻觉、只有语气词）时不调用 LLM，也不写入
+      if (!rawText || isHallucination(rawText) || !hasSpokenContent(rawText)) {
         this.emit({ state: 'error', error: '没有识别到内容', mode })
         this.settleToIdle(1800)
         return

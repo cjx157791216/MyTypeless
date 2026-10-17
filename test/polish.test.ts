@@ -6,6 +6,7 @@ import {
   llmTimeoutMs,
   collapseSelfCorrections,
   localPreClean,
+  hasSpokenContent,
   cleanLlmOutput,
   looksLikeRunaway,
   buildPolishPrompt
@@ -65,4 +66,9 @@ test('llmTimeoutMs：长文本润色超时随长度增加，有上限', () => {
   assert.equal(llmTimeoutMs(0), 25_000)
   assert.ok(llmTimeoutMs(3000) > 100_000, '20 分钟录音约几千字，不能按 25 秒超时')
   assert.equal(llmTimeoutMs(100_000), 180_000)
+})
+
+test('hasSpokenContent：只有语气词/标点的识别结果算没有内容（不调用 LLM）', () => {
+  for (const t of ['', '。', '嗯。', '嗯，啊。', '嗯嗯', '呃……', 'um, uh.']) assert.equal(hasSpokenContent(t), false, t)
+  for (const t of ['嗯，明天开会。', '那个。', '好', 'OK', '3']) assert.equal(hasSpokenContent(t), true, t)
 })

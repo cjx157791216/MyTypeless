@@ -43,6 +43,11 @@ export function localPreClean(raw: string): string {
   return collapseSelfCorrections(stripFillers(raw))
 }
 
+/** 识别结果去掉语气词后还有没有实际内容（字母、数字或汉字）；没有就不必调用 LLM */
+export function hasSpokenContent(raw: string): boolean {
+  return /[\p{L}\p{N}]/u.test(localPreClean(raw))
+}
+
 /** 清理 LLM 输出里常见的多余包装：代码围栏、整体引号、回显的标签、“以下是…：”前缀 */
 export function cleanLlmOutput(text: string): string {
   let out = text.trim()
