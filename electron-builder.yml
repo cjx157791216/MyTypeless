@@ -37,7 +37,7 @@ mac:
 # 地址必须与 src/main/update-info.ts 的 DEFAULT_UPDATE_URL 一致（test/update.test.ts 校验）；上传由 npm run release 完成
 publish:
   provider: generic
-  url: https://github.com/cjx157791216/mytypeless-releases/releases/latest/download
+  url: https://github.com/cjx157791216/MyTypeless/releases/latest/download
   updaterCacheDirName: mytypeless-updater
 # 安装包文件名带版本与构建号（构建号由 scripts/dist.cjs 设置，见 npm run dist）
 artifactName: ${productName}-${version}-${env.MT_BUILD}-${arch}.${ext}

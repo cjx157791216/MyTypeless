@@ -11,7 +11,7 @@ const yaml = require('js-yaml')
 
 test('发布地址：GitHub 公开仓库最新 Release 的下载目录，MT_UPDATE_URL 只用于本机测试', () => {
   assert.equal(updateUrl({}), DEFAULT_UPDATE_URL)
-  assert.equal(DEFAULT_UPDATE_URL, 'https://github.com/cjx157791216/mytypeless-releases/releases/latest/download')
+  assert.equal(DEFAULT_UPDATE_URL, 'https://github.com/cjx157791216/MyTypeless/releases/latest/download')
   assert.equal(updateUrl({ MT_UPDATE_URL: 'http://127.0.0.1:8787/latest/' }), 'http://127.0.0.1:8787/latest')
 })
 
@@ -52,8 +52,8 @@ test('发布脚本：版本比较与安装包文件名', () => {
   assert.equal(parseArtifact('MyTypeless-0.2.1-20261017.1015-arm64.zip.blockmap'), null)
   assert.equal(parseArtifact('latest-mac.yml'), null)
   assert.equal(
-    githubAssetUrl('cjx157791216/mytypeless-releases', '0.2.1', 'MyTypeless-0.2.1-20261017.1015-arm64.zip'),
-    'https://github.com/cjx157791216/mytypeless-releases/releases/download/v0.2.1/MyTypeless-0.2.1-20261017.1015-arm64.zip'
+    githubAssetUrl('cjx157791216/MyTypeless', '0.2.1', 'MyTypeless-0.2.1-20261017.1015-arm64.zip'),
+    'https://github.com/cjx157791216/MyTypeless/releases/download/v0.2.1/MyTypeless-0.2.1-20261017.1015-arm64.zip'
   )
 })
 

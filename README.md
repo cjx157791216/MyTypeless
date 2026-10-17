@@ -19,7 +19,7 @@ macOS 上的 AI 语音听写工具：**按住 `Fn` 说话，松开后润色好�
 
 ## 安装
 
-1. 从 [Releases](https://github.com/cjx157791216/mytypeless-releases/releases/latest) 下载最新的 `MyTypeless-<版本>-<构建号>-arm64.dmg`（仅支持 Apple Silicon）。
+1. 从 [Releases](https://github.com/cjx157791216/MyTypeless/releases/latest) 下载最新的 `MyTypeless-<版本>-<构建号>-arm64.dmg`（仅支持 Apple Silicon）。
 2. 打开 DMG，把 MyTypeless 拖进「应用程序」。安装包未经 Apple 公证，首次打开请**右键 → 打开**。
 3. 按主窗口首页的引导：
    - 下载识别模型（中文、英文推荐「中文高精度」，约 1.3GB，只需一次；之后识别完全离线）。

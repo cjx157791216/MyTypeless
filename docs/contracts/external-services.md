@@ -18,9 +18,9 @@
 
 ## 在线更新（D-028）
 
-- 发布地址（D-029）：GitHub 公开仓库 `cjx157791216/mytypeless-releases` 最新正式 Release 的下载目录 `https://github.com/cjx157791216/mytypeless-releases/releases/latest/download`（GitHub 302 跳转到 `releases/download/v<版本>/` 再到下载服务器；`src/main/update-info.ts`；环境变量 `MT_UPDATE_URL` 只用于本机测试）。
+- 发布地址（D-032）：代码仓库 `cjx157791216/MyTypeless` 最新正式 Release 的下载目录 `https://github.com/cjx157791216/MyTypeless/releases/latest/download`（0.2.1 读取旧发布仓库 `cjx157791216/mytypeless-releases` 的同名地址，那里只同步版本说明，安装包地址指向代码仓库）（GitHub 302 跳转到 `releases/download/v<版本>/` 再到下载服务器；`src/main/update-info.ts`；环境变量 `MT_UPDATE_URL` 只用于本机测试）。
 - 应用只发 GET、不带凭据、不带用户数据：`<地址>/latest-mac.yml`（electron-updater generic 格式：`version`、`files[{url,sha512,size}]`、`path`、`sha512`、`releaseDate`、`releaseNotes`，另加 `build`、`dmgUrl`），确认后下载其中 zip 的绝对地址 `https://github.com/<仓库>/releases/download/v<版本>/MyTypeless-<版本>-<构建号>-arm64.zip` 并校验 sha512。
-- 发布（只在发布者本机，GitHub REST API，`Authorization: Bearer $GH_TOKEN`）：`GET /repos/<仓库>/releases` 删掉同版本旧草稿 → `POST /repos/<仓库>/releases`（`tag_name: v<版本>`，`draft: true`）→ 向 `upload_url` `POST ?name=<文件>` 上传 zip、DMG、`latest-mac.yml` → `PATCH`（`draft: false`、`make_latest: true`）→ 匿名读回版本说明确认。仓库至少要有一个提交（建仓库时勾选添加 README），否则无法建标签。
+- 发布（只在发布者本机，GitHub REST API，`Authorization: Bearer $GH_TOKEN`）：`GET /repos/<仓库>/releases` 删掉同版本旧草稿 → `POST /repos/<仓库>/releases`（`tag_name: v<版本>`，代码仓库另带 `target_commitish: <构建提交>`，`draft: true`）→ 向 `upload_url` `POST ?name=<文件>` 上传 zip、DMG、`latest-mac.yml` → `PATCH`（`draft: false`、`make_latest: true`）→ 匿名读回版本说明确认。仓库至少要有一个提交（建仓库时勾选添加 README），否则无法建标签。
 - 日志：`~/Library/Logs/MyTypeless/update.log`（只有版本号、地址和错误）。
 
 ## ASR

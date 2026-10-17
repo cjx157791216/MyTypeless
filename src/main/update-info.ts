@@ -1,7 +1,7 @@
 // 在线更新的纯逻辑（D-028）：发布地址、错误提示。不依赖 electron，供 test/ 导入
 
-/** 发布仓库：GitHub 公开仓库，只放安装包与版本说明（Releases），代码不在这里（D-029） */
-export const GITHUB_REPO = 'cjx157791216/mytypeless-releases'
+/** 发布仓库：代码仓库本身的 Releases（D-032）。0.2.1 读取的旧发布仓库见 scripts/publish.cjs 的 LEGACY_REPOS */
+export const GITHUB_REPO = 'cjx157791216/MyTypeless'
 
 /**
  * 默认发布地址：最新正式 Release 的下载目录（GitHub 跳转到 releases/download/v<版本>/），不用登录即可读取。

@@ -61,7 +61,7 @@
 | 会议纪要 | `minutes` | 会后由 LLM 生成的 Markdown：头部本地生成，正文五节 | D-015 |
 | 临时录音 | `meetings.audio_path`（`userData/meetings/*.pcm`） | 会议期间保存在本机的录音，整理完删除 | D-016 |
 | 在线更新 | `updater.ts`、`UpdateState`、`autoCheckUpdates` | 检查发布地址的新版本 → 提示 → 用户确认后应用内下载 → 重启更新 | D-028 |
-| 发布地址 | `DEFAULT_UPDATE_URL`、`MT_UPDATE_URL` | 存放版本说明与安装包的公开地址（GitHub 公开仓库 mytypeless-releases 的最新 Release） | D-029 |
+| 发布地址 | `DEFAULT_UPDATE_URL`、`MT_UPDATE_URL` | 存放版本说明与安装包的公开地址（代码仓库 cjx157791216/MyTypeless 的最新 Release；旧版本读取 mytypeless-releases） | D-032 |
 | 版本说明 | `latest-mac.yml` | 发布地址上描述最新版本的文件：版本号、构建号、zip 地址与 sha512、更新内容；由 `npm run release` 生成上传 | D-028 |
 | 构建号 | `MT_BUILD`、`AppInfo.build` | 每次打包的时间 `YYYYMMDD.HHmm`，写在安装包文件名、CFBundleVersion 与应用内版本显示里；开发运行为 dev | [release.md](requirements/release.md) |
 | 自动学习 | `learner.ts`、`countLearned` | 从写入后的修改与常用专有名词中自动收录词典（词条来源 `auto`，标 *） | D-012 |

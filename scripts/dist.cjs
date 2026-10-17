@@ -7,7 +7,7 @@
  * 产物：release/MyTypeless-<版本>-<构建号>-arm64.dmg / -mac.zip
  */
 const { execSync } = require('child_process')
-const { readFileSync } = require('fs')
+const { readFileSync, writeFileSync } = require('fs')
 const { join } = require('path')
 
 const root = join(__dirname, '..')
@@ -15,9 +15,13 @@ const pad = (n) => String(n).padStart(2, '0')
 const now = new Date()
 const build = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.${pad(now.getHours())}${pad(now.getMinutes())}`
 let commit = 'unknown'
+let sha = ''
+let dirty = false
 try {
-  commit = execSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8' }).trim()
-  if (execSync('git status --porcelain', { cwd: root, encoding: 'utf-8' }).trim()) commit += '-dirty'
+  sha = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8' }).trim()
+  commit = sha.slice(0, 7)
+  dirty = !!execSync('git status --porcelain', { cwd: root, encoding: 'utf-8' }).trim()
+  if (dirty) commit += '-dirty'
 } catch {
   /* 不是 git 仓库 */
 }
@@ -32,4 +36,6 @@ run('npm run whisper')
 run('npm run diarize')
 run('bash scripts/setup-signing.sh')
 run(`npx electron-builder --mac --publish never -c.buildVersion=${build}`)
+// 发布（npm run release）据此核对：发布的版本必须对应已合并到 GitHub main、没有未提交改动的提交
+writeFileSync(join(root, 'release/build-info.json'), JSON.stringify({ version, build, sha, dirty }, null, 2) + '\n')
 console.log(`→ release/MyTypeless-${version}-${build}-arm64.dmg`)

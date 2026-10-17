@@ -64,7 +64,7 @@ npm run typecheck
 npm run test
 npm run build
 npm run dist           # 编译 + 原生助手 + 签名证书 + 打包到 release/MyTypeless-<版本>-<构建号>-arm64.dmg（scripts/dist.cjs）
-npm run release        # 发布为 GitHub Release（在线更新，D-028、D-029）：需 GH_TOKEN 与 --yes，人工门禁
+npm run release        # 发布为本仓库的 GitHub Release（在线更新，D-028、D-032）：GH_TOKEN=$(gh auth token) 且加 --yes，人工门禁
 npm run docs:context -- --task <id> --mode <analysis|implementation|review>
 npm run docs:check
 ```

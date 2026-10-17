@@ -62,7 +62,7 @@ npm run native      # 改了 native/*.swift 时
 
 ## 发布
 
-正式版本由维护者用固定的签名证书打包并发布到 [mytypeless-releases](https://github.com/cjx157791216/mytypeless-releases)（`npm run release`）；PR 里不需要升级版本号。
+正式版本由维护者用固定的签名证书，从已合并到 `main` 的提交打包，发布到本仓库的 [Releases](https://github.com/cjx157791216/MyTypeless/releases)（`npm run release`，版本标签打在对应提交上）；PR 里不需要升级版本号。
 
 ## 安全问题
 

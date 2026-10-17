@@ -21,7 +21,7 @@ The UI is currently in Chinese. Built-in recognition defaults to FireRedASR2 for
 
 ## Install
 
-1. Download the latest `MyTypeless-<version>-<build>-arm64.dmg` from [Releases](https://github.com/cjx157791216/mytypeless-releases/releases/latest) (Apple Silicon only).
+1. Download the latest `MyTypeless-<version>-<build>-arm64.dmg` from [Releases](https://github.com/cjx157791216/MyTypeless/releases/latest) (Apple Silicon only).
 2. Drag MyTypeless into Applications. The app is not notarized: **right-click → Open** the first time.
 3. Follow the onboarding on the home page: download a speech model, grant Accessibility and Microphone permissions, and set *System Settings → Keyboard → Press 🌐 key to* "Do Nothing". For AI polishing, fill in any OpenAI-compatible base URL and API key.
 
