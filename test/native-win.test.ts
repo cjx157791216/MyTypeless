@@ -162,3 +162,34 @@ test('mt-whisper：加载模型后 /health 就绪（与主进程相同的启动�
     child.kill()
   }
 })
+
+// mt-audiotap（线上会议截取应用声音，D-033）：只测不依赖播放声音的部分；真实截取见运行记录里的端到端测试
+test('mt-audiotap：--apps / --list 输出 JSON 数组；参数错误退出码 2', { skip }, () => {
+  for (const arg of ['--apps', '--list']) {
+    const r = run('mt-audiotap', [arg])
+    assert.equal(r.code, 0)
+    const list = JSON.parse(r.out) as Array<{ bundleId: string; name: string }>
+    assert.ok(Array.isArray(list))
+    for (const a of list) assert.match(a.bundleId, /^[^A-Z]+$/) // 小写 exe 文件名
+  }
+  assert.equal(run('mt-audiotap', ['--bogus']).code, 2)
+})
+
+test('mt-audiotap：截取不存在的应用——就绪后按真实时间输出 16kHz 静音', { skip, timeout: 20_000 }, async () => {
+  const child = spawn(bin('mt-audiotap'), ['--bundle', 'no-such-app.exe'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let err = ''
+  const chunks: Buffer[] = []
+  child.stderr.on('data', (d: Buffer) => (err += d))
+  try {
+    for (let i = 0; i < 50 && !err.includes('"ready"') && child.exitCode === null; i++) await new Promise((r) => setTimeout(r, 100))
+    if (child.exitCode === 4) return // 低于 Windows 10 build 20348（CI 机器可能不支持进程回环录音）
+    assert.match(err, /"ready":true/)
+    child.stdout.on('data', (d: Buffer) => chunks.push(d))
+    await new Promise((r) => setTimeout(r, 1000))
+    const bytes = Buffer.concat(chunks)
+    assert.ok(bytes.length > 16000 * 2 * 0.7 && bytes.length < 16000 * 2 * 1.3, `1 秒输出了 ${bytes.length} 字节`)
+    assert.ok(bytes.every((b) => b === 0))
+  } finally {
+    child.kill()
+  }
+})

@@ -301,7 +301,7 @@ export class MeetingManager {
     if (e.type === 'waiting-permission') this.flash(`请在系统弹出的对话框里允许 MyTypeless 录制系统音频，才能转写${name}里对方的声音`, 30_000)
     else if (e.type === 'ready' && this.notice?.text.includes('录制系统音频')) this.notice = null
     else if (e.type === 'silent')
-      this.flash(`一直没有收到${name}的声音：如果对方在说话，请到 系统设置 → 隐私与安全性 → 录屏与系统录音，在「仅系统录音」里允许 MyTypeless`, 20_000)
+      this.flash(process.platform === 'darwin' ? `一直没有收到${name}的声音：如果对方在说话，请到 系统设置 → 隐私与安全性 → 录屏与系统录音，在「仅系统录音」里允许 MyTypeless` : `一直没有收到${name}的声音：如果对方在说话，请确认${name}正在播放声音、没有被静音（Windows 截取的是它播放出来的声音）`, 20_000)
     else if (e.type === 'failed') this.flash(`无法截取${name}的声音（${e.error}）${a.source === 'mixed' ? '，本场先只用麦克风' : ''}`, 15_000)
     this.emit()
   }
