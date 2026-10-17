@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { compareVersions as cmp, DEFAULT_UPDATE_URL, friendlyUpdateError, needsManualInstall, pendingIsInstalled, UPDATER_CACHE_DIR, updateUrl } from '../src/main/update-info.ts'
 
 const require = createRequire(import.meta.url)
-const { compareVersions, parseArtifact, buildFeed, githubAssetUrl } = require('../scripts/publish.cjs')
+const { compareVersions, parseArtifact, buildFeed, githubAssetUrl, waitForVersion } = require('../scripts/publish.cjs')
 const yaml = require('js-yaml')
 
 test('发布地址：GitHub 公开仓库最新 Release 的下载目录，MT_UPDATE_URL 只用于本机测试', () => {
@@ -76,4 +76,14 @@ test('发布脚本：版本说明是 electron-updater 能读的格式（zip 绝�
   assert.equal(feed.path, zipUrl)
   assert.equal(feed.releaseNotes, '中文识别更准\n修复会议分人')
   assert.match(feed.dmgUrl, /\.dmg$/)
+})
+
+test('waitForVersion：发布后 latest 地址有缓存，读到旧版本时重读，读到本次版本即返回；次数用完返回最后读到的', async () => {
+  const reads = ['0.2.1', '0.2.1', '0.3.0']
+  let n = 0
+  assert.equal(await waitForVersion(async () => reads[n++], '0.3.0', { tries: 5, delayMs: 1 }), '0.3.0')
+  assert.equal(n, 3)
+  let m = 0
+  assert.equal(await waitForVersion(async () => (m++, '0.2.1'), '0.3.0', { tries: 3, delayMs: 1 }), '0.2.1')
+  assert.equal(m, 3)
 })
