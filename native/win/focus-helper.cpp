@@ -5,56 +5,15 @@
 //   mt-focus --selected-text          → 焦点输入框中选中文字的 base64（UI Automation，不碰剪贴板）；没有选中 / 不支持 / 密码框退出码 5
 //   mt-focus --caret-context <前> <后> → {"text","caret","pid"}：光标前后各若干字符（自动词典追踪修改用，D-012）；
 //                                       只输出这一段；不支持 / 密码框退出码 5。两者在目标应用没响应时超时也按 5 处理
-#include "common.h"
+#include "process-info.h"
 #include <wctype.h>
 #include <ole2.h>  // common.h 定义了 WIN32_LEAN_AND_MEAN，UI Automation 需要的 OLE 定义要单独引入
 #include <UIAutomation.h>
 #include <wrl/client.h>
 
-#pragma comment(lib, "version.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
 using Microsoft::WRL::ComPtr;
-
-static std::wstring ExePath(DWORD pid) {
-  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-  if (!h) return {};
-  wchar_t buf[MAX_PATH * 2];
-  DWORD len = (DWORD)(sizeof buf / sizeof buf[0]);
-  std::wstring path;
-  if (QueryFullProcessImageNameW(h, 0, buf, &len)) path.assign(buf, len);
-  CloseHandle(h);
-  return path;
-}
-
-static std::wstring FileName(const std::wstring &path) {
-  size_t slash = path.find_last_of(L"\\/");
-  return slash == std::wstring::npos ? path : path.substr(slash + 1);
-}
-
-static std::wstring Lower(std::wstring s) {
-  for (auto &c : s) c = (wchar_t)towlower(c);
-  return s;
-}
-
-/** 程序的文件描述（版本信息里的 FileDescription）；没有时为空 */
-static std::wstring FileDescription(const std::wstring &path) {
-  DWORD size = GetFileVersionInfoSizeW(path.c_str(), nullptr);
-  if (!size) return {};
-  std::string data(size, '\0');
-  if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data())) return {};
-  struct Lang { WORD lang, codepage; } *langs = nullptr;
-  UINT bytes = 0;
-  if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", (void **)&langs, &bytes) || bytes < sizeof(Lang)) return {};
-  wchar_t key[64];
-  swprintf(key, 64, L"\\StringFileInfo\\%04x%04x\\FileDescription", langs[0].lang, langs[0].codepage);
-  wchar_t *desc = nullptr;
-  UINT chars = 0;
-  if (!VerQueryValueW(data.data(), key, (void **)&desc, &chars) || !desc || !chars) return {};
-  std::wstring s(desc);
-  while (!s.empty() && iswspace(s.back())) s.pop_back();
-  return s;
-}
 
 /** UWP 应用的顶层窗口属于 ApplicationFrameHost.exe：找出里面真正的应用进程 */
 static DWORD UwpChildPid(HWND frame, DWORD framePid) {
@@ -98,8 +57,7 @@ static int PrintFrontApp() {
     return 0;
   }
   std::wstring exe = FileName(path);
-  std::wstring name = FileDescription(path);
-  if (name.empty()) name = exe.size() > 4 && Lower(exe.substr(exe.size() - 4)) == L".exe" ? exe.substr(0, exe.size() - 4) : exe;
+  std::wstring name = DisplayName(path);
   WriteStdout("{\"bundleId\":" + JsonString(WideToUtf8(Lower(exe))) + ",\"name\":" + JsonString(WideToUtf8(name)) +
               ",\"pid\":" + std::to_string(pid) + "}\n");
   return 0;

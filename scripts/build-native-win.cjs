@@ -22,7 +22,7 @@ const root = join(__dirname, '..')
 const src = join(root, 'native', 'win')
 const build = join(root, '.vendor', 'native-win-build')
 const out = join(root, 'native', 'bin')
-const HELPERS = ['mt-text', 'mt-focus', 'mt-inject', 'mt-hotkey']
+const HELPERS = ['mt-text', 'mt-focus', 'mt-inject', 'mt-hotkey', 'mt-audiotap']
 // 与 scripts/build-diarize.sh 的 SHERPA_VERSION 保持一致
 const SHERPA_VERSION = 'v1.13.8'
 const SHERPA_PKG = `sherpa-onnx-${SHERPA_VERSION}-win-x64-static-MT-Release-no-tts-lib`

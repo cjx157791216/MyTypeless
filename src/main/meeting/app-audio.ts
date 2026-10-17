@@ -15,8 +15,9 @@ const READY_HINT_MS = 3000
 const SILENT_HINT_MS = 60_000
 const MAX_RESTARTS = 5
 
-/** Process tap 需要 macOS 14.2+；其他平台还没有截取应用声音的助手（GAP-008） */
+/** macOS：Process tap 需要 14.2+。Windows：进程回环录音需要 Windows 10 build 20348+（即 Windows 11，GAP-008） */
 export function appAudioSupported(): boolean {
+  if (process.platform === 'win32') return Number(process.getSystemVersion().split('.')[2] ?? 0) >= 20348 && !!helperPath('mt-audiotap')
   if (process.platform !== 'darwin') return false
   const [major, minor] = process.getSystemVersion().split('.').map(Number)
   return (major > 14 || (major === 14 && minor >= 2)) && !!helperPath('mt-audiotap')
@@ -28,6 +29,12 @@ export function appAudioSupported(): boolean {
  */
 export function tapBundles(bundleId: string): string[] {
   return bundleId === 'com.apple.Safari' ? [bundleId, 'com.apple.WebKit.GPU'] : [bundleId]
+}
+
+/** MyTypeless 自己（列表里去掉、截取全部时排除）：macOS 为 bundleId 前缀，Windows 为 exe 文件名（Windows 的应用标识见 mt-audiotap 契约） */
+function ownAppId(): string {
+  if (process.platform === 'win32') return app.isPackaged ? 'mytypeless.exe' : 'electron.exe'
+  return app.isPackaged ? 'com.mytypeless' : 'com.github.Electron'
 }
 
 /** 常见会议软件（选择列表排在前面；开会时默认选正在运行的第一个） */
@@ -43,7 +50,21 @@ const MEETING_APPS = [
   'com.google.Chrome', // 网页会议（Google Meet、腾讯会议网页版…）
   'com.microsoft.edgemac',
   'com.apple.Safari',
-  'org.mozilla.firefox'
+  'org.mozilla.firefox',
+  // Windows：小写 exe 文件名（mt-audiotap --apps 的 bundleId）
+  'wemeetapp.exe', // 腾讯会议
+  'feishu.exe', // 飞书
+  'lark.exe',
+  'zoom.exe',
+  'ms-teams.exe',
+  'teams.exe',
+  'dingtalk.exe', // 钉钉
+  'weixin.exe', // 微信
+  'wechat.exe',
+  'webexhost.exe',
+  'chrome.exe',
+  'msedge.exe',
+  'firefox.exe'
 ]
 
 /** 正在运行的应用（给开会时选择“截取哪个应用的声音”）：常见会议软件在前，其次是正在发声的 */
@@ -54,7 +75,7 @@ export function listAudioApps(): Promise<AudioApp[]> {
     execFile(bin, ['--apps'], { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve([])
       try {
-        const own = app.isPackaged ? 'com.mytypeless' : 'com.github.Electron'
+        const own = ownAppId()
         const list = (JSON.parse(stdout) as AudioApp[]).filter((a) => !a.bundleId.startsWith(own))
         const rank = (a: AudioApp) => {
           const i = MEETING_APPS.indexOf(a.bundleId)
@@ -78,7 +99,9 @@ let probing: Promise<boolean> | null = null
  */
 /** 不能截取会议软件声音时给用户的说明 */
 export function appAudioUnsupportedHint(): string {
-  return process.platform === 'darwin' ? '截取会议软件的声音需要 macOS 14.2 或更新版本' : '当前平台暂不支持截取会议软件的声音'
+  if (process.platform === 'darwin') return '截取会议软件的声音需要 macOS 14.2 或更新版本'
+  if (process.platform === 'win32') return '截取会议软件的声音需要 Windows 11（Windows 10 build 20348 以上）'
+  return '当前平台暂不支持截取会议软件的声音'
 }
 
 export async function prepareAppAudio(timeoutMs = 2500): Promise<'ready' | 'waiting' | 'unsupported'> {
@@ -136,7 +159,7 @@ export class AppAudioCapture {
       ...(bundleId ? tapBundles(bundleId).flatMap((b) => ['--bundle', b]) : []),
       ...own.flatMap((pid) => ['--exclude-pid', String(pid)]),
       '--exclude-bundle',
-      app.isPackaged ? 'com.mytypeless' : 'com.github.Electron'
+      ownAppId()
     ]
   }
 

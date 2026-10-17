@@ -9,7 +9,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_compile_options(/utf-8)
 add_compile_definitions(UNICODE _UNICODE)
 
-foreach(helper mt-text mt-focus mt-inject mt-hotkey)
+foreach(helper mt-text mt-focus mt-inject mt-hotkey mt-audiotap)
   string(REPLACE "mt-" "" stem ${helper})
   add_executable(${helper} ${stem}-helper.cpp)
   target_compile_options(${helper} PRIVATE /W4 /permissive-)
