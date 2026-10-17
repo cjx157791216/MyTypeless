@@ -17,7 +17,7 @@
 调用：`mt-hotkey '<json>'`，`json = {"matches":[{"name":"dictation","key":"space","require":["opt"]}]}`。
 
 - `key`：字母、数字、标点、`space`/`return`/`tab`/`escape`/`delete`、`f1`～`f20`、方向键与翻页键；单修饰键 `fn`、`ropt`/`lopt`、`rcmd`/`lcmd`、`rshift`/`lshift`、`rctrl`/`lctrl`；`shift` 只用于 `fn+shift`（左右 Shift 都算）。未知键写 stderr `unknown key: <key>` 并跳过。
-- `require`：`opt`、`cmd`、`ctrl`、`shift`、`fn`。四个主修饰键**精确匹配**（多按了其他修饰键不触发）。Windows 版还支持区分左右的 `rshift`、`lshift`、`rctrl`、`lctrl`、`ropt`（`ralt`）、`lopt`（`lalt`）、`rcmd`、`lcmd`（该侧必须按着，同时算作对应的通用修饰键；macOS 版暂不支持，会忽略）。
+- `require`：`opt`、`cmd`、`ctrl`、`shift`、`fn`。四个主修饰键**精确匹配**（多按了其他修饰键不触发）。Windows 版还支持区分左右的 `rshift`、`lshift`、`rctrl`、`lctrl`、`ropt`（`ralt`）、`lopt`（`lalt`）、`rcmd`、`lcmd`（该侧必须按着，同时算作对应的通用修饰键）。macOS 版不支持区分左右的 `require`：主进程把这类写法判为无效（`bindings.ts`），助手遇到不认识的修饰键时写 stderr `unknown modifier: <名> in <name>` 并跳过整条规则（不能只忽略修饰键，否则 `rctrl+space` 会变成单按空格）。
 - stdout 每行一个 JSON 事件：`{"name":"system","phase":"ready"}`（tap 就绪）；`{"name":<绑定名>,"phase":"down"|"up"|"abort"}`。
 - `abort` 只用于单修饰键触发（如 `fn`）：按住期间按了其他键。若该键与 fn 组成另一条注册组合（`fn+space` 的空格、`fn+shift` 的 Shift），先发当前绑定的 `abort`、再发那条组合的 `down`，组合键被吞掉；否则只发 `abort`，按键照常传给系统（如 Fn+方向键）。
 - 命中的触发键被吞掉（包括按住时的自动重复）；单修饰键事件不吞。

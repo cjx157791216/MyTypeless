@@ -71,7 +71,7 @@ export interface DefaultBindings {
 }
 
 /**
- * 默认快捷键：macOS 按住 Fn（D-010）。Windows 键盘的 Fn 系统读不到，改用右 Ctrl（GAP-008 提议，待维护者确认）；
+ * 默认快捷键：macOS 按住 Fn（D-010）。Windows 键盘的 Fn 系统读不到，改用右 Ctrl（D-035）；
  * 没有右 Ctrl 的键盘可在设置里改为 rshift（翻译 rshift+ctrl）、ralt 等。
  * 改写不需要单独的键：选中文字后按主键即改写（rewrite 留空 = 不注册单独快捷键）。
  */

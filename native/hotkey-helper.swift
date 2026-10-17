@@ -89,7 +89,7 @@ struct Rule {
 }
 
 var rules: [Rule] = []
-for m in cfg.matches {
+ruleLoop: for m in cfg.matches {
     guard let trigger = keyTable[m.key.lowercased()] else {
         FileHandle.standardError.write("unknown key: \(m.key)\n".data(using: .utf8)!)
         continue
@@ -97,7 +97,11 @@ for m in cfg.matches {
     var req: CGEventFlags = []
     var needFn = false
     for r in (m.require ?? []) {
-        guard let f = flagTable[r.lowercased()] else { continue }
+        // 不认识的修饰键：整条规则不要（只跳过修饰键会把 rctrl+space 变成单按空格，抢走全系统的空格）
+        guard let f = flagTable[r.lowercased()] else {
+            FileHandle.standardError.write("unknown modifier: \(r) in \(m.name)\n".data(using: .utf8)!)
+            continue ruleLoop
+        }
         if f == .maskSecondaryFn { needFn = true } else { req.insert(f) }
     }
     rules.append(Rule(name: m.name, trigger: trigger,
