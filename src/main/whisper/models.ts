@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, rmSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import type { ModelInfo, ModelProgress } from '../../shared/types'
-import { MODELS, engineUnsupported, fileUrls, findModel, modelUrls, recommendedModelId, type ModelSpec } from './catalog'
+import { MODELS, fileUrls, findModel, modelUrls, recommendedModelId, type ModelSpec } from './catalog'
 import { DownloadError, downloadFile } from './download'
 
 /**
@@ -54,8 +54,7 @@ export class ModelManager {
       description: m.description,
       sizeBytes: m.sizeBytes,
       recommended: m.id === recommended,
-      installed: this.isInstalled(m.id),
-      unsupported: engineUnsupported(m.engine, process.platform)
+      installed: this.isInstalled(m.id)
     }))
   }
 
@@ -67,7 +66,7 @@ export class ModelManager {
   /** 开始下载（已在下载或已安装时直接返回）；进度与结果通过 onProgress 推送 */
   download(id: string): void {
     const spec = findModel(id)
-    if (!spec || this.active.has(id) || this.isInstalled(id) || engineUnsupported(spec.engine, process.platform)) return
+    if (!spec || this.active.has(id) || this.isInstalled(id)) return
     const ctrl = new AbortController()
     this.active.set(id, ctrl)
     const emit = (p: Omit<ModelProgress, 'id'>) => this.listeners.forEach((l) => l({ id, ...p }))

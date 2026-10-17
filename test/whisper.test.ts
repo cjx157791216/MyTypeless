@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { MODELS, engineUnsupported, findModel, fileUrls, modelUrls, recommendedModelId, resolveLanguage, resolveScript, hasHan } from '../src/main/whisper/catalog.ts'
+import { MODELS, findModel, fileUrls, modelUrls, recommendedModelId, resolveLanguage, resolveScript, hasHan } from '../src/main/whisper/catalog.ts'
 import { fixAsrCase } from '../src/main/text.ts'
 import { downloadFile, DownloadError } from '../src/main/whisper/download.ts'
 import { joinSegments } from '../src/main/providers/asr.ts'
@@ -222,11 +222,4 @@ test('stripAsrTokens：去掉 FireRedASR2 的特殊标记（<sil> 等，标点�
   assert.equal(stripAsrTokens('HELLO <sil> WORLD'), 'HELLO WORLD')
   assert.equal(stripAsrTokens('明天下午三点开会。'), '明天下午三点开会。')
   assert.equal(stripAsrTokens('3 < 5 > 2'), '3 < 5 > 2')
-})
-
-test('engineUnsupported：Whisper 引擎只在 macOS 可用（Windows 暂无，GAP-008）；FireRedASR2 各平台都可用', () => {
-  assert.equal(engineUnsupported('whisper', 'darwin'), undefined)
-  assert.match(engineUnsupported('whisper', 'win32') ?? '', /Windows 版暂不支持/)
-  assert.equal(engineUnsupported('firered', 'win32'), undefined)
-  assert.equal(engineUnsupported('firered', 'darwin'), undefined)
 })

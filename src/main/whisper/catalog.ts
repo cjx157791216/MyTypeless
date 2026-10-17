@@ -73,15 +73,6 @@ export function recommendedModelId(language: string): string {
   return language === 'zh' || language === 'en' || language === 'auto' ? 'firered2-aed-int8' : 'large-v3-turbo-q5_0'
 }
 
-/**
- * 引擎在当前平台能否使用：Whisper 引擎（mt-whisper）还没有 Windows 版（GAP-008），先不支持；
- * FireRedASR2（mt-diarize）各平台都有。返回不支持的原因，支持时为 undefined。
- */
-export function engineUnsupported(engine: 'whisper' | 'firered', platform: string): string | undefined {
-  if (engine === 'whisper' && platform !== 'darwin') return 'Windows 版暂不支持（中文、英文请用「中文高精度」）'
-  return undefined
-}
-
 /** 下载源：官方优先，访问不了时自动换国内镜像 */
 export const MODEL_SOURCES = ['https://huggingface.co', 'https://hf-mirror.com']
 

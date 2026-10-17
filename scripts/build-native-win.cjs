@@ -11,6 +11,7 @@ const { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, 
 const os = require('os')
 const { createHash } = require('crypto')
 const { join } = require('path')
+const { findCmake } = require('./win-cmake.cjs')
 
 if (process.platform !== 'win32') {
   console.error('只用于 Windows；macOS 用 npm run native')
@@ -91,22 +92,4 @@ function verifySha256(file, expected, cleanup) {
   if (actual === expected) return
   rmSync(cleanup, { recursive: true, force: true })
   throw new Error(`${file} 的 SHA256 不符：期望 ${expected}，实际 ${actual}`)
-}
-
-function findCmake() {
-  try {
-    execFileSync('cmake', ['--version'], { stdio: 'ignore' })
-    return 'cmake'
-  } catch {
-    /* 不在 PATH 里：找 Visual Studio 自带的 */
-  }
-  const vswhere = join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
-  if (existsSync(vswhere)) {
-    const found = execFileSync(vswhere, ['-latest', '-products', '*', '-find', 'Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe'], { encoding: 'utf-8' })
-      .split(/\r?\n/)
-      .find(Boolean)
-    if (found) return found
-  }
-  console.error('找不到 cmake：请安装 Visual Studio 2022 生成工具（使用 C++ 的桌面开发），或把 cmake 加入 PATH')
-  process.exit(1)
 }

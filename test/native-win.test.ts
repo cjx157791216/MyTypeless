@@ -143,3 +143,22 @@ test('mt-hotkey：主进程的 stdin 管道关闭后立即退出（主进程崩�
   assert.notEqual(code, 'timeout', 'stdin 关闭 3 秒后助手仍在运行')
   assert.ok(Date.now() - t0 < 1000)
 })
+
+// mt-whisper（npm run whisper:win）：用 whisper.cpp 自带的测试模型（随机权重，只验证能加载、能起服务）
+const testModel = join(import.meta.dirname, '..', '.vendor', 'whisper.cpp', 'models', 'for-tests-ggml-tiny.bin')
+const skipWhisper = process.platform !== 'win32' || !existsSync(bin('mt-whisper')) || !existsSync(testModel) ? '需要 Windows 与 npm run whisper:win' : false
+
+test('mt-whisper：加载模型后 /health 就绪（与主进程相同的启动参数）', { skip: skipWhisper, timeout: 90_000 }, async () => {
+  const port = 20000 + Math.floor(Math.random() * 20000)
+  const child = spawn(bin('mt-whisper'), ['-m', testModel, '--host', '127.0.0.1', '--port', String(port), '-t', '2', '-l', 'auto'], { stdio: 'ignore' })
+  try {
+    let ok = false
+    for (let i = 0; i < 600 && !ok && child.exitCode === null; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+      ok = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false)
+    }
+    assert.ok(ok, `引擎没有就绪（退出码 ${child.exitCode}）`)
+  } finally {
+    child.kill()
+  }
+})

@@ -388,7 +388,7 @@ let hideTimer: NodeJS.Timeout | null = null
 function onSessionProgress(p: SessionProgress): void {
   syncEscShortcut(p)
   // 内置引擎缺模型：直接把用户带到下载入口
-  if (p.errorCode === 'LOCAL_MODEL_MISSING' || p.errorCode === 'LOCAL_ENGINE_UNSUPPORTED') showHub('#home')
+  if (p.errorCode === 'LOCAL_MODEL_MISSING') showHub('#home')
   if (hideTimer) clearTimeout(hideTimer)
   hideTimer = null
   if (p.state === 'idle') {

@@ -21,7 +21,8 @@
 - **不要直接 `npm install`**，用 `npm run setup:win`：跳过 better-sqlite3 按 Node 编译的步骤、直接下载 Electron 版预编译包，并修正 Electron 解压不完整的问题。网络慢时先设置 `ELECTRON_MIRROR`（如 `https://npmmirror.com/mirrors/electron/`）
 - `npm run native:win` 编译 Windows 原生助手（目前有 `mt-text`、`mt-focus`、`mt-inject`、`mt-hotkey`）
 - `npm run diarize:win` 另外编译 `mt-diarize`（中文 / 英文内置识别、会议声纹，首次下载 sherpa-onnx 静态库约 120MB）
-- Windows 默认主键是右 Ctrl（按住约 0.15 秒开始说话、轻按免手持；右 Ctrl+空格 提问；右 Ctrl+Shift 翻译）。没有右 Ctrl 的键盘在设置里改为 `rshift`（翻译 `rshift+ctrl`，右 Shift+字母照常打大写）或 `ralt`。其他语言用的 Whisper 引擎还没有 Windows 版：多语种模型在设置里标为暂不支持
+- `npm run whisper:win` 编译 `mt-whisper`（多语种识别，whisper.cpp 源码，需要 git；只用 CPU）
+- Windows 默认主键是右 Ctrl（按住约 0.15 秒开始说话、轻按免手持；右 Ctrl+空格 提问；右 Ctrl+Shift 翻译）。没有右 Ctrl 的键盘在设置里改为 `rshift`（翻译 `rshift+ctrl`，右 Shift+字母照常打大写）或 `ralt`
 - 提交前同样跑 `npm run typecheck`、`npm run test`、`npm run build`、`npm run docs:check`（CI 有 Windows job）
 
 ## 提交流程

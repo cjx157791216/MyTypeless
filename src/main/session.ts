@@ -7,7 +7,7 @@ import { getKey, loadSettings } from './config'
 import { appendHistory, newRecord, listWords } from './history'
 import { injectText, captureSelectedText } from './inject'
 import { getFrontApp, getSelectedTextAX, type FrontAppInfo } from './native'
-import { builtinReady, builtinUnsupported, createBuiltinAsr, prewarmBuiltin } from './whisper'
+import { builtinReady, createBuiltinAsr, prewarmBuiltin } from './whisper'
 import { LiveTranscriber, splitForTranscription } from './live'
 import { isHallucination, joinText } from './text'
 import { learnFrequentTerms, trackEdits } from './learner'
@@ -102,13 +102,6 @@ export class DictationSessionManager {
     // 内置引擎：模型没下载就别让用户白说一段；已下载则趁说话期间预热引擎
     const startSettings = loadSettings()
     if (startSettings.asr.provider === 'builtin') {
-      // 所选语言只能用本平台没有的引擎（Windows 暂无 Whisper）：说了也识别不了
-      if (builtinUnsupported(startSettings)) {
-        this.phase = 'idle'
-        this.emit({ state: 'error', error: friendlyError(new Error('LOCAL_ENGINE_UNSUPPORTED')), errorCode: 'LOCAL_ENGINE_UNSUPPORTED', mode })
-        this.settleToIdle(3000)
-        return
-      }
       if (!builtinReady(startSettings)) {
         this.phase = 'idle'
         this.emit({ state: 'error', error: friendlyError(new Error('LOCAL_MODEL_MISSING')), errorCode: 'LOCAL_MODEL_MISSING', mode })
@@ -477,7 +470,6 @@ export function friendlyError(err: unknown): string {
   if (msg.startsWith('ASR_API_KEY_MISSING')) return '未配置语音识别 API Key（主窗口 → 设置）'
   if (msg.startsWith('LOCAL_MODEL_MISSING')) return '尚未下载语音模型：已打开主窗口，点击“下载”即可（只需一次）'
   if (msg.startsWith('LOCAL_ENGINE_MISSING')) return '内置识别引擎缺失，请重新安装 MyTypeless'
-  if (msg.startsWith('LOCAL_ENGINE_UNSUPPORTED')) return '本平台暂不支持该语言的内置识别：请在设置里把识别语言改为中文或英文，或改用云端识别'
   if (msg.startsWith('LOCAL_ENGINE_TIMEOUT')) return '本地识别引擎启动超时，请重试'
   if (msg.startsWith('LOCAL_ENGINE_FAILED')) return `本地识别引擎启动失败：${msg.replace(/^LOCAL_ENGINE_FAILED:\s*/, '').slice(0, 120)}`
   if (msg.startsWith('LLM_API_KEY_MISSING')) return '该功能需要配置润色 LLM 的 API Key（主窗口 → 设置）'

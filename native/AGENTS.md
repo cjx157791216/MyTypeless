@@ -7,7 +7,7 @@
 | `hotkey-helper.swift` → `bin/mt-hotkey` | CGEventTap 全局快捷键：只匹配传入的绑定，stdout 输出 JSON 行事件 |
 | `inject-helper.swift` → `bin/mt-inject` | 写入：Unicode 键入 / 剪贴板粘贴（完整备份恢复）/ 组合键 / 抓选区 |
 | `text-helper.swift` → `bin/mt-text` | 繁简转换（系统 ICU） |
-| `bin/mt-whisper` | 内置识别引擎：whisper.cpp 的 whisper-server，由 `scripts/build-whisper.sh` 从源码静态编译（不是本目录的 Swift 源码） |
+| `bin/mt-whisper` | 内置识别引擎：whisper.cpp 的 whisper-server，由 `scripts/build-whisper.sh` 从源码静态编译（不是本目录的 Swift 源码）；Windows 版由 `scripts/build-whisper-win.cjs` 编译成 `mt-whisper.exe`（只用 CPU） |
 | `diarize-helper.c` → `bin/mt-diarize` | 会议声纹（D-015）：常驻，按行读命令，从会议临时录音取一段算声音特征；静态链接 sherpa-onnx / ONNX Runtime，由 `scripts/build-diarize.sh` 编译；Windows 用同一份源码（`_WIN32` 分支），由 `npm run diarize:win` 编译成 `mt-diarize.exe` |
 | `focus-helper.swift` → `bin/mt-focus` | 前台应用信息（bundleId、名称、pid），以及按 pid 激活应用 |
 | `audiotap-helper.swift` → `bin/mt-audiotap` | 线上会议截取会议软件播放的声音（Core Audio process tap，macOS 14.2+，D-033）：stdout 连续输出 16kHz 单声道 s16le；`--apps` 列应用、`--probe` 开会前完成授权 |
