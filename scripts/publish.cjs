@@ -12,6 +12,7 @@
  * 令牌：`gh auth token`，或细粒度令牌（授权代码仓库与旧发布仓库的 Contents 读写）。
  * 规则：版本号必须比已发布的大（package.json 的 version，发布前手动升级）；应用必须用本机证书签名（自签名证书相同才能自动安装）；
  * 打包时不能有未提交的改动，且那次提交已合并到 GitHub 的 main（release/build-info.json，由 npm run dist 写入）。
+ * 终端设了 HTTPS_PROXY 时自动让 fetch 走代理；发布后读到的版本有缓存延迟，会重读最多约 2 分钟。
  * 先建草稿、传完全部文件再转正式：传到一半失败时，已安装的应用看不到不完整的新版本；重跑会删掉同版本的旧草稿。
  * 上传属于对外分发（人工门禁）：不带 --yes 只打印计划。
  */
@@ -82,6 +83,17 @@ async function publishedVersion(feed) {
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`读取已发布的版本说明失败：HTTP ${r.status}`)
   return require('js-yaml').load(await r.text())?.version ?? null
+}
+
+/** 发布后核对版本：GitHub 的 latest 地址有缓存，刚发布时可能还读到旧版本，隔一会儿重读，直到读到本次版本或次数用完 */
+async function waitForVersion(read, version, { tries = 12, delayMs = 10_000 } = {}) {
+  let v = null
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise((r) => setTimeout(r, delayMs))
+    v = await read()
+    if (v === version) return v
+  }
+  return v
 }
 
 async function gh(token, method, url, body) {
@@ -181,14 +193,14 @@ async function main() {
   if (!token) throw new Error('缺少环境变量 GH_TOKEN：用 GH_TOKEN=$(gh auth token) 或有代码仓库与旧发布仓库 Contents 读写权限的令牌')
 
   const pub = await release(token, repo, { tag, sha, name: `MyTypeless ${version}`, body: `${notes}\n\n构建 ${build}`.trim(), files: [zipPath, join(dir, dmgName), feedFile] })
-  const now = await publishedVersion(feed)
+  const now = await waitForVersion(() => publishedVersion(feed), version)
   if (now !== version) throw new Error(`发布后读到的版本是 ${now}，不是 ${version}`)
   console.log(`已发布 ${version}（构建 ${build}）：${pub.html_url}`)
 
   // 旧发布仓库：只放版本说明（安装包地址指向代码仓库），让还在读旧地址的版本更新过来
   for (const legacy of LEGACY_REPOS) {
     await release(token, legacy, { tag, name: `MyTypeless ${version}`, body: `已迁移到 ${pub.html_url}\n\n${notes}`.trim(), files: [feedFile] })
-    const v = await publishedVersion(`https://github.com/${legacy}/releases/latest/download`)
+    const v = await waitForVersion(() => publishedVersion(`https://github.com/${legacy}/releases/latest/download`), version)
     if (v !== version) throw new Error(`${legacy} 发布后读到的版本是 ${v}，不是 ${version}`)
     console.log(`已同步版本说明到 ${legacy}`)
   }
@@ -210,9 +222,14 @@ async function release(token, repo, { tag, sha, name, body, files }) {
   return gh(token, 'PATCH', `/repos/${repo}/releases/${rel.id}`, { draft: false, make_latest: 'true' })
 }
 
-module.exports = { compareVersions, parseArtifact, buildFeed, githubAssetUrl }
+module.exports = { compareVersions, parseArtifact, buildFeed, githubAssetUrl, waitForVersion }
 
 if (require.main === module) {
+  // 终端设了代理（HTTPS_PROXY）时 Node 的 fetch 默认不走代理，大文件直连 GitHub 会传到一半断开：带上 NODE_USE_ENV_PROXY 重新运行自己
+  if ((process.env.HTTPS_PROXY || process.env.https_proxy) && process.env.NODE_USE_ENV_PROXY !== '1') {
+    const r = require('child_process').spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } })
+    process.exit(r.status ?? 1)
+  }
   main().catch((err) => {
     console.error(String(err?.message ?? err))
     process.exit(1)
