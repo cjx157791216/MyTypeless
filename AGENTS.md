@@ -1,6 +1,6 @@
 # AI 开发规则
 
-MyTypeless：macOS 上的 AI 语音听写工具（Electron + TypeScript + Swift 原生助手），按住快捷键说话、松开后润色好的文字写入光标处；个人开源项目（MIT），自带 API Key（BYOK），数据只存本地。
+MyTypeless：macOS 与 Windows 上的 AI 语音听写工具（Electron + TypeScript；原生助手 macOS 用 Swift、Windows 用 C++），按住快捷键说话、松开后润色好的文字写入光标处；个人开源项目（MIT），自带 API Key（BYOK），数据只存本地。
 
 本文件对所有 AI 编码工具通用（Claude Code 通过同目录 `CLAUDE.md` 导入本文件；Codex、DeepSeek Harness 等直接读取）。开始任何任务前：
 
@@ -17,10 +17,10 @@ MyTypeless：macOS 上的 AI 语音听写工具（Electron + TypeScript + Swift 
 ## 开发原则
 
 1. **全部原创**：不得复制、改写或引入其他产品的代码、提示词、资源、文案、商标；不接入其服务端（D-001）。
-2. **隐私红线**：键盘监听只匹配已注册快捷键、不做按键记录；音频处理完即弃、不落盘；屏幕文字/URL 不采集；历史只存本地；API Key 只经 `safeStorage`（Keychain）加密存放（D-002）。
+2. **隐私红线**：键盘监听只匹配已注册快捷键、不做按键记录；音频处理完即弃、不落盘；屏幕文字/URL 不采集；历史只存本地；API Key 只经 `safeStorage` 加密存放（macOS 钥匙串 / Windows DPAPI，D-002）。
 3. **BYOK、无中心服务**：所有云能力走用户自配的 OpenAI 兼容端点或本地 whisper.cpp（D-003）。
 4. **听写不丢字**：润色、写入任一环节失败都要有降级（本地清理 / 剪贴板），不能让用户的话凭空消失（D-008）。
-5. **原生能力走 Swift CLI 子进程**（`native/` → `mt-*`），主进程通过 `src/main/native.ts` 调用，协议见 [原生助手契约](docs/contracts/native-helpers.md)（A-002）。
+5. **原生能力走 CLI 子进程**（`native/` → `mt-*`，macOS 为 Swift、Windows 为 C++，两边协议相同），主进程通过 `src/main/native.ts` 调用，协议见 [原生助手契约](docs/contracts/native-helpers.md)（A-002）。
 6. **IPC 只走白名单**：通道名只在 `src/shared/types.ts` 的 `IPC` 中定义，渲染端只能用 preload 暴露的 API（[IPC 契约](docs/contracts/ipc.md)）。
 
 ## 事实优先级

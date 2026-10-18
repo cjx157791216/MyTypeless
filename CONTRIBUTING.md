@@ -55,21 +55,22 @@ npm run native      # 改了 native/*.swift 时
 - **数据兼容**：`settings.json`、加密的 Key、sqlite 表结构只允许向前兼容的增量迁移。
 - **识别 / 声纹模型或阈值**：需要附上用公开人工标注数据在本机实测的对比结果（方法见 AGENTS.md 已知陷阱）。
 
-## 欢迎认领：Windows 版
+## 两个平台的实现对照
 
-目前只有 macOS 版（[D-006](docs/decisions/domains/release.md)）。Electron 主体（界面、听写流程、润色、会议、历史）可以复用，需要为 Windows 实现的主要是：
+macOS 与 Windows 共用 Electron 主体（界面、听写流程、润色、会议、历史），平台差异集中在原生助手、打包与在线更新。Windows 版自 v0.3.1 起随版本发布（[D-035](docs/decisions/domains/native.md)、[D-036](docs/decisions/domains/release.md)）。
 
-| 模块 | macOS 现状 | Windows 需要 |
+| 模块 | macOS | Windows |
 | --- | --- | --- |
-| 全局快捷键 `mt-hotkey` | Swift，CGEventTap | 低级键盘钩子；Windows 键盘的 Fn 通常系统读不到，需要另定默认键 |
-| 写入文字 `mt-inject` | Swift，CGEvent / 粘贴 | SendInput / 剪贴板粘贴 |
-| 前台应用、选区、光标附近文字 `mt-focus` | Swift，辅助功能 API | UI Automation |
-| 繁简转换 `mt-text` | Swift | 开源转换库 |
-| Whisper 引擎 `mt-whisper` | whisper.cpp + Metal | whisper.cpp（CPU / Vulkan） |
-| sherpa-onnx 助手 `mt-diarize` | C | 同一份 C 代码，换 Windows 预编译库 |
-| 打包 / 更新 | DMG + zip，Squirrel.Mac | NSIS 安装包，electron-updater（已完成，D-036） |
+| 全局快捷键 `mt-hotkey` | Swift，CGEventTap；默认 Fn | C++，低级键盘钩子；默认右 Ctrl（Fn 系统读不到） |
+| 写入文字 `mt-inject` | Swift，CGEvent / 粘贴 | C++，SendInput / 剪贴板粘贴 |
+| 前台应用、选区、光标附近文字 `mt-focus` | Swift，辅助功能 API | C++，UI Automation |
+| 繁简转换 `mt-text` | Swift，系统 ICU | C++，系统 LCMapStringEx |
+| Whisper 引擎 `mt-whisper` | whisper.cpp + Metal | whisper.cpp（只用 CPU） |
+| sherpa-onnx 助手 `mt-diarize` | 同一份 C 代码 | 同一份 C 代码，Windows 预编译静态库 |
+| 截取会议软件声音 `mt-audiotap` | Core Audio process tap（macOS 14.2+） | WASAPI 进程回环录音（Windows 11） |
+| 打包 / 在线更新 | DMG + zip，Squirrel.Mac | NSIS 安装包 + 解压即用 zip，electron-updater |
 
-原生助手与主进程的协议见 [原生助手契约](docs/contracts/native-helpers.md)。有意做的话请先开 Issue，说明打算从哪部分开始。
+原生助手与主进程的协议见 [原生助手契约](docs/contracts/native-helpers.md)；改协议时 Swift 与 C++ 两份实现在同一个 PR 里一起改（见 [native/AGENTS.md](native/AGENTS.md)）。Linux 版还没有开始，有意做的话请先开 Issue。
 
 ## 发布
 

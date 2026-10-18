@@ -54,6 +54,12 @@ export function appKind(bundleId: string): AudioAppKind {
 }
 
 /**
+ * 同类应用按名字排序的语言区域：固定为中文（界面是中文；中文名按拼音、英文名按字母，中文在前）。
+ * 不指定时用系统语言，中文系统与英文系统排出的顺序不同（#37）
+ */
+const NAME_LOCALE = 'zh-CN'
+
+/**
  * 给 mt-audiotap --apps 的结果分类并排序：通话软件（按常用程度）→ 浏览器 → 其他应用（正在发声的在前，再按名字）；
  * 去掉 MyTypeless 自己（ownId 为本进程的 bundleId 前缀或 exe 名；打包版无论如何都去掉）。
  */
@@ -66,5 +72,5 @@ export function classifyAudioApps(apps: Omit<AudioApp, 'kind'>[], ownId: string)
   return apps
     .filter((a) => ![ownId, ...MYTYPELESS_IDS].some((id) => a.bundleId.toLowerCase().startsWith(id.toLowerCase())))
     .map((a) => ({ ...a, kind: appKind(a.bundleId) }))
-    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, NAME_LOCALE))
 }

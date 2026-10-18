@@ -44,8 +44,8 @@ test('classifyAudioApps：通话软件在前（按常用程度），浏览器其
       ['Google Chrome', 'browser'],
       ['Firefox', 'browser'],
       ['ChatGPT', 'other'], // 其他应用里正在发声的在前
-      ['Microsoft Excel', 'other'],
-      ['预览', 'other']
+      ['预览', 'other'], // 同类按中文排序（与系统语言无关，#37）：中文名按拼音在前、英文名按字母在后
+      ['Microsoft Excel', 'other']
     ]
   )
 })
