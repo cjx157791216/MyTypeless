@@ -1,7 +1,7 @@
 {
   "name": "mytypeless",
   "productName": "MyTypeless",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "macOS 上的 AI 语音听写工具：按住快捷键说话，润色好的文字写入光标处；本地识别、自带 API Key、数据只存本地",
   "main": "./out/main/index.js",
   "private": true,
