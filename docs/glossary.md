@@ -37,6 +37,7 @@
 | 中文输出 | `asr.chineseScript` | 内置引擎中文结果的字形：跟随系统 / 简体 / 繁体 / 不转换 | [pipeline.md](requirements/pipeline.md) |
 | 原话 | `rawText` | 语音识别直接输出、未经处理的文本 | [ipc.md](contracts/ipc.md) |
 | 润色 | `polish`、`LlmPolisher` | 用 LLM 把原话整理成书面文字（含翻译、改写、提问的 LLM 调用） | [pipeline.md](requirements/pipeline.md) |
+| 润色评测集 | `polish-eval.json`、`scripts/polish-eval.ts` | 原创的识别原文与检查条件，用真实模型对比新旧润色提示词 | D-038 |
 | 本地清理 | `localPreClean` | 不调用 LLM 的规则清理：去填充词、保守的改口折叠 | [pipeline.md](requirements/pipeline.md) |
 | 结果 | `polishedText` | 会话最终投递的文本（润色、译文、改写结果或回答） | [ipc.md](contracts/ipc.md) |
 | 个人词典 | `dict_words` | 用户维护的专有名词表，用于识别提示和润色约束 | [pipeline.md](requirements/pipeline.md) |

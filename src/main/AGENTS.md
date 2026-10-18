@@ -54,7 +54,7 @@
 
 ## 测试
 
-`npm run test`（`test/*.test.ts`：润色规则、模型目录、分段合并、下载续传/换源/校验、实时转写、自动词典、会议分句/聚类/纪要、在线更新与发布脚本；说话人聚类用 `test/fixtures/speakers.json` 的真实录音声纹做回归）；`npm run typecheck`。
+`npm run test`（`test/*.test.ts`：润色规则、模型目录、分段合并、下载续传/换源/校验、实时转写、自动词典、会议分句/聚类/纪要、在线更新与发布脚本；说话人聚类用 `test/fixtures/speakers.json` 的真实录音声纹做回归）；`npm run typecheck`。改听写润色提示词后用自己的 LLM 跑 `MT_LLM_BASE_URL=… MT_LLM_MODEL=… MT_LLM_KEY=… node scripts/polish-eval.ts`（原创评测集 `test/fixtures/polish-eval.json`，与旧提示词对比通过数和耗时）；提示词固定部分（规则、示例）在前，场景、词表等每次变化的内容放最后（前缀缓存）。
 
 ## 必读
 

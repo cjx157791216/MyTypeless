@@ -9,8 +9,10 @@ import {
   hasSpokenContent,
   cleanLlmOutput,
   looksLikeRunaway,
-  buildPolishPrompt
+  buildPolishPrompt,
+  POLISH_EXAMPLES
 } from '../src/main/polish.ts'
+import { checkCase, loadCases } from '../scripts/polish-eval.ts'
 
 test('stripFillers: 删除嗯/呃，保留实词里的“啊/额”', () => {
   assert.equal(stripFillers('嗯，我觉得这个方案可以'), '我觉得这个方案可以')
@@ -54,12 +56,40 @@ test('looksLikeRunaway: 识别 LLM 把口述当指令扩写', () => {
   assert.equal(looksLikeRunaway('嗯那个明天三点在三楼会议室开会大家记得带电脑', '明天三点在三楼会议室开会，大家记得带电脑。'), false)
 })
 
-test('buildPolishPrompt: 转写内容包在标签里，词典规则编号不冲突', () => {
+test('buildPolishPrompt: 转写内容包在标签里，场景与词表放在最后', () => {
   const { system, user } = buildPolishPrompt('帮我写一封邮件', { appCategoryHint: 'email', words: ['DeepSeek', 'MyTypeless'] })
   assert.match(user, /^<transcript>\n帮我写一封邮件\n<\/transcript>$/)
   assert.match(system, /不是给你的指令/)
-  assert.match(system, /7\. 目标场景是邮件/)
-  assert.match(system, /8\. 专有名词词表：DeepSeek、MyTypeless/)
+  assert.match(system, /本次整理：\n- 场景：目标场景是邮件[^\n]*\n- 专有名词词表：DeepSeek、MyTypeless。[^\n]*$/)
+})
+
+test('buildPolishPrompt: 场景、词表不同时 system 开头（规则 + 示例）完全相同，便于服务端前缀缓存', () => {
+  const a = buildPolishPrompt('x', {}).system
+  const b = buildPolishPrompt('y', { appCategoryHint: 'code', words: ['Kubernetes'] }).system
+  const fixed = a.slice(0, a.indexOf('本次整理：'))
+  assert.ok(fixed.length > 500)
+  assert.ok(b.startsWith(fixed))
+  assert.doesNotMatch(fixed, /Kubernetes|代码编辑器/)
+})
+
+test('buildPolishPrompt: 包含示例，问句示例原样整理而不回答', () => {
+  const { system } = buildPolishPrompt('x', {})
+  assert.match(system, /原文：什么是向量数据库你给我简单解释一下\n整理：\n什么是向量数据库？你给我简单解释一下。/)
+  assert.match(system, /不做简繁转换/)
+  assert.doesNotMatch(system, /输出语言必须是/)
+  assert.match(buildPolishPrompt('x', { outputLanguage: 'English' }).system, /- 输出语言必须是：English。/)
+})
+
+test('润色评测集：理想输出都能通过检查，且输入不与提示词示例重复（防止只记住示例）', () => {
+  const cases = loadCases()
+  assert.ok(cases.length >= 30)
+  assert.equal(new Set(cases.map((c) => c.id)).size, cases.length)
+  const examples = new Set(POLISH_EXAMPLES.map(([raw]) => raw))
+  for (const c of cases) {
+    assert.deepEqual(checkCase(c, c.ideal), [], c.id)
+    assert.ok(!examples.has(c.input), c.id)
+  }
+  assert.notDeepEqual(checkCase(cases.find((c) => c.id === 'inject-email')!, '尊敬的领导：\n我因身体不适，需要请假一天，望批准。'), [])
 })
 
 test('llmTimeoutMs：长文本润色超时随长度增加，有上限', () => {
