@@ -187,68 +187,73 @@
           </div>
 
           <div id="meeting-detail-view" class="hidden">
-            <header class="page-head detail-head">
-              <div class="detail-title">
-                <button id="btn-meeting-back" class="btn icon-btn" title="返回会议列表">
-                  <svg viewBox="0 0 20 20"><path d="M12.5 4.5 7 10l5.5 5.5" /></svg>
-                </button>
-                <div>
-                  <input id="meeting-detail-title" class="title-input" type="text" />
-                  <p class="sub" id="meeting-detail-meta"></p>
+            <!-- 标题、状态条、说话人栏、标签页固定在顶部，只有下面的 #meeting-detail-scroll 滚动 -->
+            <div class="detail-top">
+              <header class="page-head detail-head">
+                <div class="detail-title">
+                  <button id="btn-meeting-back" class="btn icon-btn" title="返回会议列表">
+                    <svg viewBox="0 0 20 20"><path d="M12.5 4.5 7 10l5.5 5.5" /></svg>
+                  </button>
+                  <div>
+                    <input id="meeting-detail-title" class="title-input" type="text" />
+                    <p class="sub" id="meeting-detail-meta"></p>
+                  </div>
                 </div>
+                <div class="row-actions" id="meeting-detail-actions">
+                  <button id="btn-meeting-export" class="btn mini">导出 Markdown</button>
+                  <button id="btn-meeting-delete" class="btn mini danger">删除</button>
+                </div>
+              </header>
+
+              <div class="live-bar hidden" id="meeting-live-bar">
+                <i class="rec-dot"></i>
+                <span id="meeting-live-time" class="live-time">00:00</span>
+                <span id="meeting-live-hint" class="hint"></span>
+                <span class="spacer"></span>
+                <button id="btn-meeting-pause" class="btn">暂停</button>
+                <button id="btn-meeting-stop" class="btn danger-solid">结束会议</button>
               </div>
-              <div class="row-actions" id="meeting-detail-actions">
-                <button id="btn-meeting-export" class="btn mini">导出 Markdown</button>
-                <button id="btn-meeting-delete" class="btn mini danger">删除</button>
+              <div class="processing-bar hidden" id="meeting-processing-bar">
+                <span class="spinner"></span><span id="meeting-processing-text">正在整理…</span>
               </div>
-            </header>
 
-            <div class="live-bar hidden" id="meeting-live-bar">
-              <i class="rec-dot"></i>
-              <span id="meeting-live-time" class="live-time">00:00</span>
-              <span id="meeting-live-hint" class="hint"></span>
-              <span class="spacer"></span>
-              <button id="btn-meeting-pause" class="btn">暂停</button>
-              <button id="btn-meeting-stop" class="btn danger-solid">结束会议</button>
-            </div>
-            <div class="processing-bar hidden" id="meeting-processing-bar">
-              <span class="spinner"></span><span id="meeting-processing-text">正在整理…</span>
-            </div>
+              <div class="speaker-bar" id="speaker-bar"></div>
 
-            <div class="speaker-bar" id="speaker-bar"></div>
-
-            <div class="tabs" id="meeting-tabs">
-              <button data-tab="minutes">纪要</button>
-              <button data-tab="transcript">转写</button>
-              <button data-tab="speakers">说话人</button>
-            </div>
-
-            <div class="tab-panel" data-tab="minutes">
-              <div class="card minutes-card">
-                <div class="card-head">
-                  <span class="hint" id="minutes-state"></span>
-                  <span class="row-actions">
-                    <button id="btn-minutes-edit" class="btn mini">编辑</button>
-                    <button id="btn-minutes-copy" class="btn mini">复制</button>
-                    <button id="btn-minutes-regen" class="btn mini">重新生成</button>
-                  </span>
-                </div>
-                <div id="minutes-view" class="markdown"></div>
-                <textarea id="minutes-editor" class="minutes-editor hidden" spellcheck="false"></textarea>
-                <div class="row-actions hidden" id="minutes-edit-actions">
-                  <button id="btn-minutes-save" class="btn primary">保存</button>
-                  <button id="btn-minutes-cancel" class="btn">取消</button>
-                </div>
+              <div class="tabs" id="meeting-tabs">
+                <button data-tab="minutes">纪要</button>
+                <button data-tab="transcript">转写</button>
+                <button data-tab="speakers">说话人</button>
               </div>
             </div>
 
-            <div class="tab-panel" data-tab="transcript">
-              <div id="transcript" class="transcript"></div>
-            </div>
+            <div class="detail-scroll" id="meeting-detail-scroll">
+              <div class="tab-panel" data-tab="minutes">
+                <div class="card minutes-card">
+                  <div class="card-head">
+                    <span class="hint" id="minutes-state"></span>
+                    <span class="row-actions">
+                      <button id="btn-minutes-edit" class="btn mini">编辑</button>
+                      <button id="btn-minutes-copy" class="btn mini">复制</button>
+                      <button id="btn-minutes-regen" class="btn mini">重新生成</button>
+                    </span>
+                  </div>
+                  <div id="minutes-view" class="markdown"></div>
+                  <textarea id="minutes-editor" class="minutes-editor hidden" spellcheck="false"></textarea>
+                  <div class="row-actions hidden" id="minutes-edit-actions">
+                    <button id="btn-minutes-save" class="btn primary">保存</button>
+                    <button id="btn-minutes-cancel" class="btn">取消</button>
+                  </div>
+                </div>
+              </div>
 
-            <div class="tab-panel" data-tab="speakers">
-              <div class="hint speakers-hint">说话人按参会人数和声音区分；随时可以改名，所有发言同步更新。「记住这个声音」默认勾选：下次会议自动认出这个人（声纹只存本机，可在 设置 → 声纹 中删除）。</div>
-              <div id="speaker-list" class="speaker-list"></div>
+              <div class="tab-panel" data-tab="transcript">
+                <div id="transcript" class="transcript"></div>
+              </div>
+
+              <div class="tab-panel" data-tab="speakers">
+                <div class="hint speakers-hint">说话人按参会人数和声音区分；随时可以改名，所有发言同步更新。「记住这个声音」默认勾选：下次会议自动认出这个人（声纹只存本机，可在 设置 → 声纹 中删除）。</div>
+                <div id="speaker-list" class="speaker-list"></div>
+              </div>
             </div>
           </div>
         </section>

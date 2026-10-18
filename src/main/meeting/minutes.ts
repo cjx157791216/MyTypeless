@@ -106,7 +106,7 @@ export function minutesHeader(meta: MinutesMeta): string {
     '',
     `- 时间：${when}`,
     `- 时长：${formatDuration(meta.durationMs)}`,
-    `- 参会人：${meta.speakers.length ? meta.speakers.join('、') : '—'}`,
+    `- 参会人：${meta.speakers.length ? meta.speakers.map((n) => (/[*`]/.test(n) ? n : `**${n}**`)).join('、') : '—'}`,
     ''
   ].join('\n')
 }

@@ -307,7 +307,7 @@ test('纪要：头部本地生成；模型输出去掉围栏和一级标题；�
   const header = minutesHeader({ title: '周会', startedAt: new Date(2026, 9, 15, 14, 5).getTime(), durationMs: 1_800_000, speakers: ['张三', '李四'] })
   assert.match(header, /^# 周会\n/)
   assert.match(header, /2026-10-15 14:05/)
-  assert.match(header, /参会人：张三、李四/)
+  assert.match(header, /参会人：\*\*张三\*\*、\*\*李四\*\*/)
   assert.equal(cleanMinutesBody('```markdown\n# 纪要\n## 决议\n- 无\n```'), '## 决议\n- 无')
   const md = exportMarkdown('# 周会\n\n## 决议\n- 无', ['[00:00] 张三：好'])
   assert.match(md, /## 完整记录\n\n\[00:00\] 张三：好\n$/)

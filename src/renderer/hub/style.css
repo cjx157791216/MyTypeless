@@ -257,6 +257,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .status-badge.warn { background: rgba(217, 119, 6, 0.12); color: var(--warn); }
 .interrupted { border-color: var(--warn); flex-direction: row; align-items: center; justify-content: space-between; }
 
+/* 会议详情：页面撑满内容区不再整体滚动，头部固定，只有 .detail-scroll 滚动（滚动条从标签栏下方开始）。
+   两块都铺满宽度，内容按 .page 的 900px 版心居中，滚动条贴在窗口右边 */
+#page-meeting.detail-mode { height: 100%; max-width: none; padding: 34px 0 0; }
+#page-meeting.detail-mode #meeting-detail-view { flex: 1; min-height: 0; gap: 0; }
+/* 两块都预留滚动条位置，头部与下面内容的左右边缘对齐 */
+.detail-top, .detail-scroll { padding-inline: max(36px, calc((100% - 828px) / 2)); scrollbar-gutter: stable; }
+.detail-top { flex-shrink: 0; overflow: hidden; display: flex; flex-direction: column; gap: 16px; }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 16px; padding-bottom: 40px; }
 .detail-head { align-items: center; }
 .detail-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .detail-title > div { min-width: 0; flex: 1; }
@@ -321,6 +329,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .markdown li.task { list-style: none; margin-left: -18px; }
 .markdown li.task::before { content: '☐ '; color: var(--muted); }
 .markdown li.task.done::before { content: '☑ '; color: var(--ok); }
+.markdown .speaker-mention { font-weight: 600; padding: 0 4px; margin: 0 1px; border-radius: 4px; }
 .markdown p { margin: 6px 0; }
 .markdown code { font-size: 12px; }
 

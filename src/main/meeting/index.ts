@@ -2,6 +2,7 @@ import { app, powerMonitor } from 'electron'
 import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, unlinkSync, writeSync } from 'fs'
 import { join } from 'path'
 import type { MeetingLive, MeetingSource, MeetingStartOptions, MeetingTrack } from '../../shared/types'
+import { markSpeakerNames } from '../../shared/speaker-mentions'
 import { getKey, hasKey, loadSettings, saveSettings } from '../config'
 import { listWords } from '../history'
 import { SAMPLE_RATE } from '../live'
@@ -999,7 +1000,8 @@ export class MeetingManager {
           this.emit()
         }
       })
-      const minutes = `${minutesHeader({ title: detail.title, startedAt: detail.startedAt, durationMs: detail.durationMs, speakers })}\n${cleanMinutesBody(body)}\n`
+      // 正文里的说话人名字在本地加粗（复制、导出也带着），不交给模型
+      const minutes = `${minutesHeader({ title: detail.title, startedAt: detail.startedAt, durationMs: detail.durationMs, speakers })}\n${markSpeakerNames(cleanMinutesBody(body), speakers)}\n`
       store.updateMeeting(meetingId, { minutes, minutesError: null })
       this.minutesCache.delete(meetingId)
       return { ok: true }

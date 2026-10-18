@@ -17,7 +17,6 @@ let editing = false
 let navigate: (hash: string) => void = () => {}
 let reloadTimer: number | null = null
 
-const content = () => document.querySelector('.content') as HTMLElement
 
 export function initMeeting(nav: (hash: string) => void): void {
   navigate = nav
@@ -36,8 +35,10 @@ export async function showMeetingPage(id?: string): Promise<void> {
   if (id !== currentId) {
     tabChosen = false
     editing = false
+    $('meeting-detail-scroll').scrollTop = 0
   }
   currentId = id ?? null
+  $('page-meeting').classList.toggle('detail-mode', !!id)
   $('meeting-list-view').classList.toggle('hidden', !!id)
   $('meeting-detail-view').classList.toggle('hidden', !id)
   if (id) await loadDetail()
@@ -513,7 +514,7 @@ function speakerName(id: number | null): string {
 
 function renderTranscript(): void {
   const box = $('transcript')
-  const scroller = content()
+  const scroller = $('meeting-detail-scroll')
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80
   box.innerHTML = ''
   const d = detail!
@@ -644,6 +645,7 @@ function renderMinutes(): void {
   if (editing) return
   if (d.minutes) {
     view.innerHTML = renderMarkdown(d.minutes)
+    markSpeakers(view, d.speakerList)
     state.textContent = ''
   } else {
     view.innerHTML = ''
@@ -652,6 +654,19 @@ function renderMinutes(): void {
       : isLiveHere()
         ? '会议结束后自动生成纪要'
         : d.minutesError ?? '这场会议只保存了记录，需要时点「生成纪要」'
+  }
+}
+
+/** 纪要原文里加粗的说话人名字（生成时本地加的 `**名字**`）显示成说话人颜色；改名后旧名字只是普通粗体 */
+function markSpeakers(root: HTMLElement, speakers: MeetingSpeaker[]): void {
+  const colors = new Map<string, string>()
+  for (const sp of speakers) if (!colors.has(sp.displayName)) colors.set(sp.displayName, colorOf(sp))
+  for (const el of root.querySelectorAll<HTMLElement>('strong')) {
+    const color = colors.get(el.textContent ?? '')
+    if (!color) continue
+    el.classList.add('speaker-mention')
+    el.style.color = color
+    el.style.background = `${color}1f`
   }
 }
 
