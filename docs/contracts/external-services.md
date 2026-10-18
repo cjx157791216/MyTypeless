@@ -40,6 +40,7 @@
 - `POST <baseUrl>/chat/completions`（OpenAI 兼容），`model` 取自设置，`messages = [system, user]`，默认 `temperature` 0.2（语音提问 0.5）。
 - 返回 400 且错误信息提到 `temperature` 时，去掉该参数重试一次（兼容不支持 temperature 的推理模型）。
 - 超时随文本长度增加：25 秒 + 每字 30 毫秒，上限 180 秒（`llmTimeoutMs`，D-014）；读取 `choices[0].message.content`，经 `cleanLlmOutput` 去掉引号、代码围栏和回显的标签。
-- 错误码：`LLM_API_KEY_MISSING`、`LLM_HTTP_<status>`、`LLM_EMPTY_RESPONSE`。
+- 错误码：`LLM_API_KEY_MISSING`、`LLM_HTTP_<status>`（带服务端返回内容）、`LLM_EMPTY_RESPONSE`；`LLM_NOT_COMPATIBLE`（返回 200 但不是 OpenAI 格式，多为 Base URL 填错）、`LLM_STREAM_ERROR`（流里服务端报错）。给用户看的原因由 `describeLlmError` 翻译。
+- 测试连接（设置页，`LlmPolisher.ping`）：`stream: true`，user 为“请只回复：OK”，收到第一条带 `choices` 的事件（思考过程也算）即算连通，不等写完；整体超时 30 秒。
 - 听写、翻译时 user 内容用 `<transcript>…</transcript>` 包裹；改写时为「原文 + 口述指令」两段。
-- 会议纪要（D-015）：user 内容为 `<transcript>` 包裹的转写稿（每行 `[时间] 发言人：内容`，同一人连续发言合并），只含转写文字与说话人名字（D-016）；超过约 12,000 字时先分段整理提要再汇总；`temperature` 0.3，超时 180 秒；纪要头部（主题、时间、时长、参会人）在本地生成，模型只写正文五节（议题与讨论要点、决议、待办事项、未决问题、各人发言摘要）。提示词见 `src/main/meeting/minutes.ts`（原创，D-001）。
+- 会议纪要（D-015）：user 内容为 `<transcript>` 包裹的转写稿（每行 `[时间] 发言人：内容`，同一人连续发言合并），只含转写文字与说话人名字（D-016）；超过约 12,000 字时按长度均分成段、最多 3 段同时整理提要（HTTP 429 时等 5 / 15 / 30 秒重试），提要合起来仍超过上限时逐层合并，再汇总；每次请求的输入不超过约 12,000 字；`temperature` 0.3，`stream: true`，连续 180 秒没有任何输出（含思考过程）才算超时，总时长上限 20 分钟；纪要头部（主题、时间、时长、参会人）在本地生成，模型只写正文五节（议题与讨论要点、决议、待办事项、未决问题、各人发言摘要）。提示词见 `src/main/meeting/minutes.ts`（原创，D-001）。

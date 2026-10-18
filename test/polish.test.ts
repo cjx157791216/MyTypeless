@@ -12,7 +12,8 @@ import {
   buildPolishPrompt,
   POLISH_EXAMPLES,
   createSseParser,
-  LlmPolisher
+  LlmPolisher,
+  describeLlmError
 } from '../src/main/polish.ts'
 import { checkCase, loadCases } from '../scripts/polish-eval.ts'
 import { createServer, type ServerResponse } from 'node:http'
@@ -176,4 +177,71 @@ test('LlmPolisher.complete：服务不支持流式、直接返回整段 JSON 时
   } finally {
     srv.close()
   }
+})
+
+// —— 设置页「测试连接」：收到第一段输出就算连通；失败说清原因并带上服务端原话 ——
+
+const pingErr = (p: Promise<unknown>) => p.then(() => '', (e) => describeLlmError(e))
+
+test('ping：流式收到第一段输出（思考过程也算）就算连通，不等模型写完', async () => {
+  const srv = await fakeLlm((res, body) => {
+    assert.equal(body.stream, true)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    sse(res, { reasoning_content: '嗯' }) // 之后一直不结束：ping 不应等它
+  })
+  try {
+    const ms = await llmFor(srv.url, 2_000).ping()
+    assert.ok(typeof ms === 'number' && ms >= 0 && ms < 2_000)
+  } finally {
+    srv.close()
+  }
+})
+
+test('ping：Key、地址、模型名错误时说清原因并带上服务端原话', async () => {
+  const cases: Array<[number, object, RegExp]> = [
+    [401, { error: { message: '令牌已过期或验证不正确' } }, /API Key 无效或没有权限（HTTP 401）.*令牌已过期/],
+    [404, { error: { message: 'Not Found' } }, /地址或模型不存在（HTTP 404）.*Base URL/],
+    [400, { error: { message: 'Model Not Exist' } }, /请求被拒绝（HTTP 400）.*模型名.*Model Not Exist/],
+    [429, { error: { message: 'quota exceeded' } }, /太频繁或额度不足（HTTP 429）.*quota exceeded/],
+    [503, { message: 'overloaded' }, /服务端出错（HTTP 503）.*overloaded/]
+  ]
+  for (const [status, body, re] of cases) {
+    const srv = await fakeLlm((res) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(body))
+    })
+    try {
+      assert.match(await pingErr(llmFor(srv.url, 2_000).ping()), re)
+    } finally {
+      srv.close()
+    }
+  }
+})
+
+test('ping：返回 200 但不是 OpenAI 兼容格式（地址填错，如智谱 /api/v1）时提示检查 Base URL', async () => {
+  const srv = await fakeLlm((res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ code: 401, msg: '令牌已过期或验证不正确', success: false }))
+  })
+  try {
+    assert.match(await pingErr(llmFor(srv.url, 2_000).ping()), /不是 OpenAI 兼容格式.*Base URL.*令牌已过期/)
+  } finally {
+    srv.close()
+  }
+})
+
+test('ping：连不上、超时、没填 Key、地址格式不对', async () => {
+  const closed = await fakeLlm(() => {})
+  const url = closed.url
+  closed.close()
+  assert.match(await pingErr(llmFor(url, 2_000).ping()), /连接被拒绝|无法连接/)
+
+  const silent = await fakeLlm(() => {}) // 收到请求后一直不回
+  try {
+    assert.match(await pingErr(llmFor(silent.url, 150).ping()), /超时/)
+  } finally {
+    silent.close()
+  }
+  assert.match(await pingErr(new LlmPolisher({ llm: { baseUrl: 'http://127.0.0.1:1/v1', model: 'm' } } as unknown as Settings, '', 1_000).ping()), /未填写 API Key/)
+  assert.match(await pingErr(llmFor('api.example.com/v1', 1_000).ping()), /Base URL 格式不对/)
 })

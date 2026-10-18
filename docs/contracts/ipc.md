@@ -18,6 +18,7 @@
 | `settingsSet` | `settings.set(patch)` | `Partial<Settings>` 深合并 → 新 `Settings`；同时重注册快捷键、更新登录项 |
 | `settingsSetKey` | `settings.setKey(which, key)` | `'asr' \| 'llm'`、Key（空串表示删除）→ `{ ok, masked }` |
 | `asrHealth` | `settings.asrHealth(baseUrl?)` | → `{ ok, detail? }`（请求 `<baseUrl>/health`） |
+| `llmTest` | `settings.llmTest(cfg)` | `{ baseUrl, model, apiKey? }`（设置页当前填写的值；`apiKey` 为空时用已保存的 Key，会访问钥匙串）→ `{ ok, ms?, error? }`：`ms` 为到第一段输出的耗时，`error` 为给用户看的原因（`describeLlmError`，含服务端原话） |
 | `modelList` | `models.list()` | → `ModelInfo[]`（含是否已安装） |
 | `modelDownload` / `modelCancel` | `models.download(id)` / `models.cancel(id)` | 开始 / 取消下载；进度经 `modelProgress` 推送；取消保留已下载部分 |
 | `modelRemove` | `models.remove(id)` | 删除模型（正在使用时先停引擎）→ 最新 `ModelInfo[]` |

@@ -35,7 +35,8 @@ const api = {
     get: () => ipcRenderer.invoke(IPC.settingsGet),
     set: (patch: unknown) => ipcRenderer.invoke(IPC.settingsSet, patch),
     setKey: (which: 'asr' | 'llm', key: string) => ipcRenderer.invoke(IPC.settingsSetKey, which, key),
-    asrHealth: (baseUrl?: string) => ipcRenderer.invoke(IPC.asrHealth, baseUrl)
+    asrHealth: (baseUrl?: string) => ipcRenderer.invoke(IPC.asrHealth, baseUrl),
+    llmTest: (cfg: { baseUrl: string; model: string; apiKey?: string }) => ipcRenderer.invoke(IPC.llmTest, cfg)
   },
   models: {
     list: () => ipcRenderer.invoke(IPC.modelList),

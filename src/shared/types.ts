@@ -260,6 +260,7 @@ export const IPC = {
   settingsSet: 'mt:settings-set',
   settingsSetKey: 'mt:settings-set-key', // { which: 'asr'|'llm', key: string }
   asrHealth: 'mt:asr-health', // 本地 whisper.cpp server 健康检查
+  llmTest: 'mt:llm-test', // 测试润色 LLM 设置是否连通（用设置页当前填写的值）
 
   // 内置引擎模型
   modelList: 'mt:model-list',

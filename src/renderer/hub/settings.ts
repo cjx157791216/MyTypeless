@@ -278,6 +278,26 @@ $('btn-asr-health').addEventListener('click', async () => {
   state.textContent = r.ok ? `✓ 引擎在线 ${r.detail ?? ''}` : `✗ 不在线（${r.detail ?? 'unknown'}）`
 })
 
+// 测试润色 LLM：用当前填写的地址、模型（与保存时的默认值一致）和 Key（留空则用已保存的）
+$('btn-llm-test').addEventListener('click', async () => {
+  const btn = $('btn-llm-test') as HTMLButtonElement
+  const state = $('llm-test-state') as HTMLElement
+  btn.disabled = true
+  state.className = 'hint'
+  state.textContent = '测试中…'
+  try {
+    const r = await api.settings.llmTest({
+      baseUrl: ($('llm-base-url') as HTMLInputElement).value.trim() || 'https://api.openai.com/v1',
+      model: ($('llm-model') as HTMLInputElement).value.trim() || 'gpt-6-luna',
+      apiKey: ($('llm-key') as HTMLInputElement).value.trim() || undefined
+    })
+    state.classList.add(r.ok ? 'ok' : 'bad')
+    state.textContent = r.ok ? `✓ 连通正常（${((r.ms ?? 0) / 1000).toFixed(1)} 秒）` : `✗ ${r.error ?? '测试失败'}`
+  } finally {
+    btn.disabled = false
+  }
+})
+
 $('btn-save').addEventListener('click', async () => {
   const hotkeyKey = ($('bind-dictation') as HTMLInputElement).value.trim() || defaultBindings(api.platform).hotkeyKey
   const provider = ($('asr-provider') as HTMLSelectElement).value as AsrProviderConfig['provider']

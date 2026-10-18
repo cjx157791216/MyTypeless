@@ -5,7 +5,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { IPC, type SessionProgress, type Settings, type FeatureMode, type MeetingLive, type MeetingStartOptions, type MeetingTrack } from '../shared/types'
 import type { PermissionStatus } from '../shared/api'
-import { loadSettings, saveSettings, hasKey, keyMask, setKey, maskKey } from './config'
+import { loadSettings, saveSettings, hasKey, keyMask, setKey, maskKey, getKey } from './config'
+import { LlmPolisher, describeLlmError } from './polish'
 import { DictationSessionManager } from './session'
 import { HotkeyController } from './hotkeys'
 import { listHistory, getHistory, deleteHistory, clearHistory, listWords, addWord, removeWord, historyStats } from './history'
@@ -532,6 +533,18 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.asrHealth, async (_e, baseUrl?: string) => {
     return checkLocalAsrHealth(baseUrl || loadSettings().asr.baseUrl)
+  })
+
+  // 测试 LLM 设置（设置页当前填写的值，不必先保存）：Key 栏留空时用已保存的 Key（会访问钥匙串）
+  ipcMain.handle(IPC.llmTest, async (_e, cfg: { baseUrl: string; model: string; apiKey?: string }) => {
+    try {
+      const settings = { ...loadSettings(), llm: { baseUrl: cfg.baseUrl, model: cfg.model } }
+      const key = cfg.apiKey?.trim() || (hasKey('llm') ? getKey('llm') : '')
+      const ms = await new LlmPolisher(settings, key, 30_000).ping()
+      return { ok: true, ms }
+    } catch (err) {
+      return { ok: false, error: describeLlmError(err) }
+    }
   })
 
   ipcMain.handle(IPC.historyList, (_e, limit?: number, offset?: number) => listHistory(limit, offset))
