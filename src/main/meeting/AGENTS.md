@@ -1,0 +1,46 @@
+# src/main/meeting — 会议模式：录制、分句、说话人区分与声纹、纪要
+
+## 结构
+
+| 路径 | 职责 |
+| --- | --- |
+| `index.ts` | `MeetingManager` 编排：两路（`Track`：0 = 麦克风 / 现场，1 = 应用声音 / 线上）录音、分句、声纹、识别、整体归类、整理与纪要 |
+| `segmenter.ts` | 按停顿分句 `UtteranceSegmenter`、两路对齐、句内换人切分、慢电脑降级判定 `denoiseLagging` / `overloaded`（纯逻辑） |
+| `cluster.ts` | 说话人聚类（平均链接）与声纹匹配 `printScore`（纯逻辑） |
+| `minutes.ts` | 转写稿、纪要提示词、长会议纪要编排 `generateMinutesBody`（均分、并发、逐层合并、断点续做）（纯逻辑） |
+| `echo.ts` / `enhance.ts` | 外放回声去除 / 识别前音量归一 `normalizeLoudness`（纯逻辑） |
+| `call-apps.ts` | 线上会议可选应用分类：通话软件 / 浏览器 / 其他（D-039，纯逻辑） |
+| `app-audio.ts` | 线上会议的应用声音：`mt-audiotap` 进程、应用列表、开会前授权 `prepareAppAudio`（D-033） |
+| `diarizer.ts` | 声纹 / 分段 / 降噪模型下载与 `mt-diarize` 进程 |
+| `store.ts` | 会议、说话人、句子、声纹的 sqlite 存储 |
+
+纯逻辑模块被 `test/` 导入：不能 import `electron`、不能用 TS 参数属性，互相导入写 `.ts` 扩展名。
+
+## 不变量
+
+- 会议与听写共用浮动条的麦克风管线和内置引擎；会议进行中 `session.setBlocker` 拦下听写。
+- 临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。转写稿用 `wrapMeetingTranscript` 包裹。
+- 两路的说话人不能互相合并或改归属；各路各自分句、区分说话人、算人数；麦克风那一路识别前先 `echoFree` 去掉外放回声。
+- 用应用声音前必须先 `prepareAppAudio`：macOS 用户点「允许」录制系统音频后，系统会**退出并重新打开所有 MyTypeless 实例**（包括隔离测试实例），不能发生在会议中途；没授权时系统只给全零、不报错。
+- 分句：停顿切句后，每句再用分段模型（带前 8 秒参考录音）找句内换人——真人对话常不停顿就接话；分段模型在几秒的短片段里分不清人，必须带参考录音。会议已区分出各人后改用 `splitByWindows`（1.5 秒窗口与各人比较，D-025）；按窗口切的段不要再 `mergeAdjacentParts`（同一声源下不同人也可能 ≥ 0.55，会把切开的又合回）。
+- “是不是同一个人”一律用平均链接（与某人每段的平均相似度；在线归入 0.57、达到参会人数后只归入最像的人），不要用“与归一化中心的余弦”：同一声源（一台麦克风、外放、同一房间）给所有人加上相同成分，中心比较会把不同的人并成一个。会议中每 20 秒整体重新归类一次，整体归类只按参会人数——D-021 去掉了自动判断人数（短句会议里不同人可到 0.4、同一人可低到 0.1，任何门槛都两头出错），不要加回来。
+- 声纹认人（D-022）用整组声音的匹配分（÷ 声纹自身一致度，`printScore`），不要用固定相似度门槛比单句：有的人自己各句之间平均只有 0.5。
+- 远场（D-024）：GTCRN 降噪后的声音只用于分句，**不要拿去识别**（弱的人声会被一起削掉，很远时错字翻倍）；识别用原始录音 + `normalizeLoudness`。上一句做提示词、简单谱减降噪实测没有稳定收益。
+- 慢电脑（Windows 低压 4 核实测）：降噪（低优先级）落后超过 8 秒即停用、改用原始录音分句（`denoiseLagging`）；排队超过 3 句不做句内换人切分（`overloaded`）。
+- `mt-audiotap`（macOS）：tap 报 48kHz，但数据按输出设备的实际采样率到来，要按聚集设备的 `NominalSampleRate` 重采样（详见 `native/AGENTS.md`）。
+
+## 改动前必做的回归
+
+- 改聚类：通过 `test/fixtures/speakers.json`（sr-data 真人完整段与 1～2.5 秒短句，原声 / 外放）的回归。真实会议多是 1～2 秒短句，同一人两句可低到 0.1～0.3，不要只用长句数据调门槛。
+- 换声纹模型（D-026）：用 `scripts/gen-speaker-fixture.cjs` 重新生成 fixture，按真实会议录音重新标定 `SAME_SPEAKER` / `KNOWN_CUT` / `PRINT_MATCH`（保持不同人误并率不变），并改 `EMBED_MODEL`——不同模型的声纹维度可能相同但不可比较。
+- 改分句或识别前处理：用远场模拟（音量小 18/26 dB + 混响 + 房间底噪）对比，不要只用近讲录音。
+- 改外放回声门槛 `ECHO_CORR`：用 `scripts/echo-sim.ts`（真人录音 + 模拟外放）重新标定，同时看“只有回声被去掉多少”和“戴耳机 / 同时说话时现场的话保留多少”。
+- 改识别、声纹、降噪管线：用低配机器或限制 CPU 实测，不要只在 M 系列 Mac 上测。
+
+## 测试
+
+`npm run test`（`test/meeting.test.ts`、`echo.test.ts`、`call-apps.test.ts`）；端到端用打包版隔离实例，`--user-data-dir` 必须带空格（见根 `AGENTS.md`）。
+
+## 必读
+
+[会议需求](../../../docs/requirements/meeting.md) · [会议决策](../../../docs/decisions/domains/meeting.md) · [原生助手契约](../../../docs/contracts/native-helpers.md)

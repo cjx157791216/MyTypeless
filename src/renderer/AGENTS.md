@@ -25,7 +25,7 @@
 - 胶囊各状态由 `.pill` 的 `state-*` 与 `hands-free` 类驱动，样式里不要写死文案。
 - 浮动条 CSP 必须保留 `script-src 'self' blob:`（AudioWorklet 从 blob URL 加载）。
 - 收到 `captureFlush` 后必须冲刷 worklet 剩余音频再调用 `audioFinal`。
-- 麦克风：设置指定优先；“自动”跳过虚拟输入设备（优先内置麦克风）；开麦 0.6 秒内全是纯零则自动换到下一个真实麦克风并提示；设备插拔后重新选择。
+- 麦克风：设置指定优先；“自动”跳过虚拟输入设备（优先内置麦克风）；开麦 0.6 秒内全是纯零则自动换到下一个真实麦克风并提示；设备插拔后重新选择（`floating-bar/main.ts` 的 `pickDeviceId` / `switchFromSilentDevice`；系统默认输入可能是只出纯静音的虚拟设备，如变声器）。
 - 会话结束后按设置立即释放或保持就绪 60 秒（D-011）；AudioContext 与 worklet 模块可以常驻。
 - 用户文本不得直接拼进 `innerHTML`。
 - 快捷键名、系统设置路径按 `api.platform` 显示（`src/shared/platform.ts`）；只在 macOS 有意义的元素（辅助功能授权等）加 `mac-only` 类，只在其他平台显示的加 `non-mac`；页面里写死的主键名放进 `.main-key`（非 macOS 由 `renderShortcuts` 换成实际主键）。
@@ -37,7 +37,7 @@
 
 ## 测试
 
-没有渲染端自动测试；`npm run typecheck` 覆盖类型。行为验证用 `npm run dev`，或以 `--remoteDebuggingPort` 启动后用 CDP 驱动（见 `docs/_history/agent-runs/2026-10-14-stability-fixes.md`）。
+没有渲染端自动测试。`npm run typecheck` 覆盖类型。行为验证用 `npm run dev`，或以 `--remoteDebuggingPort` 启动后用 CDP 驱动（见 `docs/_history/agent-runs/2026-10-14-stability-fixes.md`）。Windows 测浮动条鼠标要用 `mouse_event` / `SendInput` 产生真实输入：`SetCursorPos` 不经过低级鼠标钩子，`forward` 收不到移动；PowerShell 不感知缩放，坐标用逻辑像素；接点击的测试窗口不要置顶（会被激活后盖住浮动条）。
 
 ## 必读
 

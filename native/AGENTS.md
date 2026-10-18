@@ -31,6 +31,9 @@
 - 参数先校验（错误一律 `exit(2)`、不发任何按键），再检查权限：无辅助功能权限一律 `exit(3)`；`mt-hotkey` 在父进程退出后自行退出。
 - `mt-audiotap` 的 IOProc 必须直接在音频线程调用（不给 dispatch queue，否则会跳过 IO 周期、声音变短）；音频线程只下混写入预分配缓冲；重采样按聚集设备的实际采样率（tap 报的格式不准，扬声器常是 44.1kHz）。
 - Windows 剪贴板：备份不了（被别的程序占着）就不能动剪贴板，否则事后“恢复”等于清空用户原来的内容；`SnapshotClipboard` 区分“备份失败”与“原本为空”。
+- Electron / Chromium 应用（Claude、VS Code、Slack…）默认不公开辅助功能树：问系统焦点元素返回 -25204，读不到输入框文字。`mt-focus` 的 `focusedElement` 会改问应用自己的焦点并打开 `AXManualAccessibility`；新增读文字的原生功能要复用它，并用 Electron 应用实测。
+- Windows 读选区 / 光标上下文：Chromium / Electron 应用要先唤醒辅助功能，且唤醒前已获得焦点的输入框要等光标动一次才可读（听写开始时的选区检查负责唤醒）；WinForms 文本框经系统代理“支持”文本模式却读出空串，要退到 `EM_GETSEL` / `WM_GETTEXT`。
+- `mt-audiotap`（macOS）：用户点「允许」录制系统音频后系统会重启所有 MyTypeless 实例，授权必须在开会前用 `--probe` 完成；没授权时只给全零、不报错。
 - Windows 版与 macOS 版协议完全一致（同名、带 `.exe`）；stdin/stdout 用二进制模式（换行不被转成 CRLF），文本一律 UTF-8；静态链接运行库，不依赖 VC++ 运行库。
 
 ## 依赖与影响面
@@ -40,7 +43,7 @@
 
 ## 测试
 
-`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。两个平台共同的协议与退出码在 `test/native-helpers.test.ts`（`npm run test`，助手未编译时跳过；只测不发按键、不读输入框的路径）；Windows 独有的部分（`mt-hotkey --replay`、`mt-whisper`、`mt-audiotap` 输出）在 `test/native-win.test.ts`，需先 `npm run native:win`。快捷键与写入需要辅助功能权限，只能真机验证。
+`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。两个平台共同的协议与退出码在 `test/native-helpers.test.ts`（`npm run test`，助手未编译时跳过；只测不发按键、不读输入框的路径）；Windows 独有的部分（`mt-hotkey --replay`、`mt-whisper`、`mt-audiotap` 输出）在 `test/native-win.test.ts`，需先 `npm run native:win`。快捷键与写入需要辅助功能权限，只能真机验证。Windows 端到端测试只能对自建窗口操作（脚本发按键前核对前台进程与窗口标题），不能用记事本等真实应用（Windows 11 记事本会恢复用户未关闭的标签页）。
 
 ## 必读
 
