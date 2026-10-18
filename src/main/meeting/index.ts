@@ -28,16 +28,7 @@ import { AppAudioCapture, appAudioSupported, appAudioUnsupportedHint, prepareApp
 import { denoiser, diarizer, speakerModel } from './diarizer'
 import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
-import {
-  buildTranscript,
-  chunkNotesSystemPrompt,
-  chunkTranscript,
-  cleanMinutesBody,
-  minutesHeader,
-  minutesSystemPrompt,
-  wrapChunkNotes,
-  wrapMeetingTranscript
-} from './minutes'
+import { buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
 import {
   MEETING_VAD,
   MEETING_VAD_DENOISED,
@@ -131,6 +122,8 @@ export interface MeetingHooks {
 export class MeetingManager {
   private active: Active | null = null
   private processing: { id: string; stage: string } | null = null
+  /** 纪要已完成的请求结果（按会议）：生成失败后重试只补没完成的段；生成成功或删除会议时清掉 */
+  private minutesCache = new Map<string, Map<string, string>>()
   private notice: { text: string; until: number } | null = null
   private hooks: MeetingHooks
 
@@ -572,6 +565,7 @@ export class MeetingManager {
   delete(meetingId: string): boolean {
     if (this.active?.id === meetingId || this.processing?.id === meetingId) return false
     for (const path of store.deleteMeeting(meetingId)) removeFile(path)
+    this.minutesCache.delete(meetingId)
     return true
   }
 
@@ -944,22 +938,20 @@ export class MeetingManager {
       // 流式接收：连续 3 分钟没有任何输出（含思考过程）才算超时（GLM-5.3 等强制深度思考，长转写稿要先想几分钟）
       const llm = new LlmPolisher(settings, key, 180_000)
       const speakers = detail.speakerList.map((s) => s.displayName)
-      const chunks = chunkTranscript(lines)
-      let body: string
-      if (chunks.length === 1) body = await llm.complete(minutesSystemPrompt(speakers), wrapMeetingTranscript(chunks[0]))
-      else {
-        const notes: string[] = []
-        for (let i = 0; i < chunks.length; i++) {
-          this.processing = { id: meetingId, stage: `正在整理第 ${i + 1}/${chunks.length} 段…` }
+      let cache = this.minutesCache.get(meetingId)
+      if (!cache) this.minutesCache.set(meetingId, (cache = new Map()))
+      // 长会议：均分成段、最多 3 段同时整理、提要太多时逐层合并（minutes.ts 的 generateMinutesBody）
+      const body = await generateMinutesBody(lines, speakers, {
+        complete: (system, user) => llm.complete(system, user),
+        cache,
+        progress: (stage) => {
+          this.processing = { id: meetingId, stage }
           this.emit()
-          notes.push(await llm.complete(chunkNotesSystemPrompt(), wrapMeetingTranscript(chunks[i], { index: i + 1, total: chunks.length })))
         }
-        this.processing = { id: meetingId, stage: '正在生成会议纪要…' }
-        this.emit()
-        body = await llm.complete(minutesSystemPrompt(speakers), wrapChunkNotes(notes))
-      }
+      })
       const minutes = `${minutesHeader({ title: detail.title, startedAt: detail.startedAt, durationMs: detail.durationMs, speakers })}\n${cleanMinutesBody(body)}\n`
       store.updateMeeting(meetingId, { minutes, minutesError: null })
+      this.minutesCache.delete(meetingId)
       return { ok: true }
     } catch (err) {
       // 转写稿已完整保存（D-008 的会议版），只记录纪要失败的原因

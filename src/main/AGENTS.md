@@ -23,7 +23,7 @@
 | `updater.ts` / `update-info.ts` | 在线更新（D-028）：electron-updater 检查 / 下载 / 重启安装与状态推送 / 发布地址与错误提示（纯逻辑） |
 | `build-info.ts` | 版本信息 `appInfo`：package.json 版本 + 打包时注入的构建号与提交（`electron.vite.config.ts` 的 define） |
 | `wav.ts` / `tray-icon.ts` | PCM → WAV；托盘模板图（由 `scripts/gen-tray-icon.py` 生成） |
-| `meeting/` | 会议模式（D-015、D-016）：`segmenter.ts` 按停顿分句与两路对齐、`cluster.ts` 说话人聚类与声纹匹配、`minutes.ts` 转写稿与纪要提示词、`echo.ts` 外放回声去除（以上纯逻辑）；`app-audio.ts` 线上会议的应用声音（`mt-audiotap` 进程、应用列表、开会前授权，D-033）；`store.ts` 会议/说话人/句子/声纹存储；`diarizer.ts` 声纹模型下载与 `mt-diarize` 进程；`index.ts` 编排 `MeetingManager` |
+| `meeting/` | 会议模式（D-015、D-016）：`segmenter.ts` 按停顿分句与两路对齐、`cluster.ts` 说话人聚类与声纹匹配、`minutes.ts` 转写稿、纪要提示词与长会议纪要编排 `generateMinutesBody`（均分、并发、逐层合并、断点续做）、`echo.ts` 外放回声去除（以上纯逻辑）；`app-audio.ts` 线上会议的应用声音（`mt-audiotap` 进程、应用列表、开会前授权，D-033）；`store.ts` 会议/说话人/句子/声纹存储；`diarizer.ts` 声纹模型下载与 `mt-diarize` 进程；`index.ts` 编排 `MeetingManager` |
 
 ## 可复制范例
 
@@ -32,7 +32,7 @@
 - 新增 IPC：照 `index.ts` 中 `IPC.historyClear` 的 handler（完整步骤见 recipes）。
 - 表结构增量迁移：照 `history.ts` 的 `migrateColumns`（`PRAGMA table_info` + `ALTER TABLE ADD COLUMN`）。
 - 把错误码翻译成用户提示：`session.ts` 的 `friendlyError`。
-- 新增会议 LLM 任务：提示词写在 `meeting/minutes.ts`（转写稿用 `wrapMeetingTranscript` 包裹），经 `LlmPolisher.complete` 调用。
+- 新增会议 LLM 任务：提示词写在 `meeting/minutes.ts`（转写稿用 `wrapMeetingTranscript` 包裹），经 `LlmPolisher.complete` 调用（流式，`timeoutMs` 是连续无输出的超时）。
 
 ## 不变量
 

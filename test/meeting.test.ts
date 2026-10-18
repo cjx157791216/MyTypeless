@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { ALIGN_TOLERANCE, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, planFeed, samplesToMs, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
 import { readFileSync } from 'node:fs'
 import { OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
-import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown } from '../src/main/meeting/minutes.ts'
+import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown, generateMinutesBody, chunkNotesSystemPrompt, mergeNotesSystemPrompt } from '../src/main/meeting/minutes.ts'
 import { renderMarkdown } from '../src/shared/markdown.ts'
 import { normalizeLoudness } from '../src/main/meeting/enhance.ts'
 
@@ -421,4 +421,85 @@ test('两路对齐（D-033）：落后会议时间线超过容差才补静音，
   assert.equal(alignPad(32000, 1600, 64000), 64000 - 32000 - 1600)
   // 比时间线超前（采集早到一点）：不动
   assert.equal(alignPad(20000, 1600, 16000), 0)
+})
+
+// —— 长会议纪要：均分、并发、逐层汇总、断点续做 ——
+
+const line = (i: number, len = 100) => `[${String(i).padStart(4, '0')}] 张三：${'字'.repeat(len)}`
+
+test('chunkTranscript：按总长度均分，不出现“一大段 + 一小段”', () => {
+  // 约 12.5k 字、上限 12k：原来切成 11.9k + 0.5k，现在两段大致相等
+  const lines = Array.from({ length: 120 }, (_, i) => line(i))
+  const chunks = chunkTranscript(lines, 12_000)
+  assert.equal(chunks.length, 2)
+  assert.ok(chunks.every((c) => c.length <= 12_000))
+  assert.ok(Math.abs(chunks[0].length - chunks[1].length) < 300, chunks.map((c) => c.length).join(','))
+  assert.equal(chunks.join('\n'), lines.join('\n')) // 不丢不重、顺序不变
+  assert.deepEqual(chunkTranscript([], 100), [])
+  // 单行超过上限：单独成段，不拆开
+  assert.deepEqual(chunkTranscript(['短', '长'.repeat(50), '短'], 20), ['短', '长'.repeat(50), '短'])
+})
+
+type Call = { kind: 'notes' | 'merge' | 'minutes'; user: string }
+function fakeModel(opts: { notesLen?: number; fail?: (c: Call, n: number) => Error | null; delayMs?: number } = {}) {
+  const calls: Call[] = []
+  let inFlight = 0
+  let maxInFlight = 0
+  const complete = async (system: string, user: string) => {
+    const kind: Call['kind'] = system === chunkNotesSystemPrompt() ? 'notes' : system === mergeNotesSystemPrompt() ? 'merge' : 'minutes'
+    const c = { kind, user }
+    calls.push(c)
+    const nth = calls.filter((x) => x.kind === kind).length // 调用开始时就定下序号（并发时等完再数会乱）
+    inFlight++
+    maxInFlight = Math.max(maxInFlight, inFlight)
+    try {
+      await new Promise((r) => setTimeout(r, opts.delayMs ?? 5))
+      const err = opts.fail?.(c, nth)
+      if (err) throw err
+      return kind === 'minutes' ? '## 决议\n- 无' : '要'.repeat(opts.notesLen ?? 200)
+    } finally {
+      inFlight--
+    }
+  }
+  return { complete, calls, maxInFlight: () => maxInFlight }
+}
+
+test('generateMinutesBody：短会议一次生成；长会议先并发整理各段（最多 3 个同时），再汇总', async () => {
+  const short = fakeModel()
+  assert.equal(await generateMinutesBody([line(1)], ['张三'], { complete: short.complete }), '## 决议\n- 无')
+  assert.deepEqual(short.calls.map((c) => c.kind), ['minutes'])
+
+  const long = fakeModel()
+  const stages: string[] = []
+  const lines = Array.from({ length: 500 }, (_, i) => line(i)) // 约 5.4 万字 → 5 段
+  await generateMinutesBody(lines, ['张三'], { complete: long.complete, progress: (s) => stages.push(s) })
+  assert.deepEqual(long.calls.map((c) => c.kind), ['notes', 'notes', 'notes', 'notes', 'notes', 'minutes'])
+  assert.equal(long.maxInFlight(), 3)
+  assert.ok(stages.includes('正在整理各段（5/5）…') && stages.at(-1) === '正在生成会议纪要…', stages.join(' | '))
+})
+
+test('generateMinutesBody：各段提要合起来超过上限时逐层合并，最后一次请求不超过上限', async () => {
+  const m = fakeModel({ notesLen: 3_000 }) // 每段提要 3000 字，十几段合起来 4 万多字
+  const lines = Array.from({ length: 1_400 }, (_, i) => line(i))
+  await generateMinutesBody(lines, ['张三'], { complete: m.complete })
+  const kinds = m.calls.map((c) => c.kind)
+  assert.equal(kinds.filter((k) => k === 'notes').length, chunkTranscript(lines, 12_000).length)
+  assert.ok(kinds.includes('merge'))
+  assert.equal(kinds.at(-1), 'minutes')
+  assert.ok(m.calls.every((c) => c.user.length <= 12_000 + 200), m.calls.map((c) => c.user.length).join(','))
+})
+
+test('generateMinutesBody：失败后重试只补没完成的段；遇到 429 等一会儿自动重试', async () => {
+  const lines = Array.from({ length: 500 }, (_, i) => line(i))
+  const cache = new Map<string, string>()
+  const first = fakeModel({ fail: (c, n) => (c.kind === 'notes' && n === 4 ? new Error('LLM_HTTP_500: boom') : null) })
+  await assert.rejects(generateMinutesBody(lines, ['张三'], { complete: first.complete, cache }), /LLM_HTTP_500/)
+  const second = fakeModel()
+  await generateMinutesBody(lines, ['张三'], { complete: second.complete, cache })
+  // 第一次已完成的段不再请求（同时在跑的段也做完存下了）
+  assert.deepEqual(second.calls.map((c) => c.kind), ['notes', 'minutes'], second.calls.map((c) => c.kind).join(','))
+
+  const limited = fakeModel({ fail: (c, n) => (c.kind === 'minutes' && n === 1 ? new Error('LLM_HTTP_429: too many requests') : null) })
+  assert.equal(await generateMinutesBody([line(1)], [], { complete: limited.complete, retryDelaysMs: [1] }), '## 决议\n- 无')
+  assert.equal(limited.calls.length, 2)
 })
