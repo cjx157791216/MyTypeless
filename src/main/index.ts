@@ -8,7 +8,7 @@ import type { PermissionStatus } from '../shared/api'
 import { loadSettings, saveSettings, hasKey, keyMask, setKey, maskKey } from './config'
 import { DictationSessionManager } from './session'
 import { HotkeyController } from './hotkeys'
-import { listHistory, getHistory, deleteHistory, clearHistory, listWords, addWord, removeWord, historyStats } from './history'
+import { listHistory, getHistory, deleteHistory, clearHistory, listWords, addWord, removeWord, historyStats, listStyleSamples, deleteStyleSample, clearStyleSamples } from './history'
 import { checkAccessibility, injectText, openAccessibilitySettings } from './inject'
 import { activateApp } from './native'
 import { checkLocalAsrHealth } from './providers/asr'
@@ -492,8 +492,10 @@ function registerIpc(): void {
     return s
   })
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<Settings>) => {
+    const prev = loadSettings()
     const next = saveSettings(patch)
-    if (!next.learnFromEdits) stopTracking() // 关闭“从修改中学习”：立即停止进行中的追踪
+    // 关闭“从修改中学习”或风格学习：立即停止进行中的追踪（D-012、D-040）
+    if ((prev.learnFromEdits && !next.learnFromEdits) || (prev.learnStyle && !next.learnStyle)) stopTracking()
     // 不再使用内置引擎，或换了模型：释放当前引擎（下次开口按新设置启动）
     const running = whisperEngine.runningModel()
     if (running && (next.asr.provider !== 'builtin' || running !== modelManager.installedPath(selectedModelId(next)))) {
@@ -618,6 +620,16 @@ function registerIpc(): void {
   ipcMain.handle(IPC.voiceprintDelete, (_e, id: number) => {
     meetingStore.deleteVoiceprint(id)
     return meetingStore.listVoiceprints()
+  })
+
+  ipcMain.handle(IPC.styleSampleList, () => listStyleSamples())
+  ipcMain.handle(IPC.styleSampleDelete, (_e, id: number) => {
+    deleteStyleSample(id)
+    return listStyleSamples()
+  })
+  ipcMain.handle(IPC.styleSampleClear, () => {
+    clearStyleSamples()
+    return listStyleSamples()
   })
 
   ipcMain.handle(IPC.answerInsert, async (_e, text: string) => {

@@ -1,6 +1,6 @@
 import type { AppMode } from '../../shared/types'
 import { $, api, fmtClock } from './util'
-import { loadSettingsIntoUi, loadVoiceprints, onSettingsSaved, refreshPermissions, renderSpeakerModel } from './settings'
+import { loadSettingsIntoUi, loadStyleSamples, loadVoiceprints, onSettingsSaved, refreshPermissions, renderSpeakerModel } from './settings'
 import { loadHome, renderShortcuts } from './home'
 import { loadHistory } from './history'
 import { loadDict } from './dict'
@@ -51,6 +51,7 @@ async function route(): Promise<void> {
   } else if (page === 'history') void loadHistory()
   else if (page === 'dict') void loadDict()
   else if (page === 'settings') {
+    void loadStyleSamples()
     // 声纹列表加载完再滚动：列表在「关于」上方，加载后会把它往下推
     void loadVoiceprints().then(() => arg && document.getElementById(`settings-${arg}`)?.scrollIntoView({ block: 'start' }))
   }

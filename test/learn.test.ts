@@ -1,7 +1,7 @@
 // 自动词典学习（D-012）：专有名词提取、修改比对、收录规则
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractTerms, diffCorrections, learnableFromCorrection, tokenize } from '../src/main/learn.ts'
+import { extractTerms, diffCorrections, editedSpan, learnableFromCorrection, tokenize } from '../src/main/learn.ts'
 
 test('extractTerms：内部大写、全大写缩写、字母数字混合；排除普通词、常见缩写和版本号', () => {
   assert.deepEqual(
@@ -37,4 +37,22 @@ test('learnableFromCorrection：英文改一次即收录；中文需累计；过
   assert.deepEqual(learnableFromCorrection({ from: '开放', to: '开饭' }), { term: '开饭', immediate: false })
   assert.equal(learnableFromCorrection({ from: 'ok', to: 'OK' }), null)
   assert.equal(learnableFromCorrection({ from: 'a', to: 'this is a whole new sentence written here' }), null)
+})
+
+test('editedSpan（风格学习，D-040）：找出写入那一段被改成的样子，排除前后无关文字', () => {
+  const at = (s: string, mark = s.length) => mark
+  assert.equal(editedSpan('这个方案还可以。', 'XX这个方案挺好的。YY', at('XX这个方案挺好的。')), '这个方案挺好的。')
+  assert.equal(editedSpan('我们明天开会。', '前面的内容。我们明天开会', at('前面的内容。我们明天开会')), '我们明天开会')
+  // 上文里有很多相同的字，也不会把对齐拉到上文里
+  assert.equal(editedSpan('好的。', '的的的的。好的', 7), '好的')
+  // 光标停在末尾追加的几个字后面：算进修改（表情、语气词）
+  assert.equal(editedSpan('收到。', '前文收到👌', '前文收到👌'.length), '收到👌')
+})
+
+test('editedSpan：没有改动、整段重写、末尾追加太多时不当作风格修改', () => {
+  assert.equal(editedSpan('好的。', '的的的的。好的。', 8), null)
+  assert.equal(editedSpan('好的。', '好的。 ', 4), null) // Chromium 读到末尾多一个空格
+  assert.equal(editedSpan('今天下午开会', '完全不同的一段话写在这里', 12), null)
+  const typedMore = '好的。我再补充一大段自己继续写的内容'
+  assert.equal(editedSpan('好的。', typedMore, typedMore.length), null)
 })

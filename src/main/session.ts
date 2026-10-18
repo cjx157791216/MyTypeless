@@ -1,12 +1,12 @@
 import { BrowserWindow, clipboard, powerMonitor } from 'electron'
 import { IPC, type SessionProgress, type FeatureMode } from '../shared/types'
 import { createAsrProvider } from './providers/asr'
-import { hasSpokenContent, LlmPolisher, llmTimeoutMs, localPreClean, type PolishTask } from './polish'
+import { CONTEXT_MAX_CHARS, hasSpokenContent, LlmPolisher, llmTimeoutMs, localPreClean, STYLE_SAMPLES_IN_PROMPT, type PolishTask } from './polish'
 import { pcm16ToWav } from './wav'
 import { getKey, loadSettings } from './config'
-import { appendHistory, newRecord, listWords } from './history'
+import { appendHistory, newRecord, listWords, pickStyleSamples } from './history'
 import { injectText, captureSelectedText } from './inject'
-import { getFrontApp, getSelectedTextAX, type FrontAppInfo } from './native'
+import { getCaretContext, getFrontApp, getSelectedTextAX, type FrontAppInfo } from './native'
 import { builtinReady, createBuiltinAsr, prewarmBuiltin } from './whisper'
 import { LiveTranscriber, splitForTranscription } from './live'
 import { isHallucination, joinText } from './text'
@@ -45,6 +45,8 @@ export class DictationSessionManager {
   private liveText = ''
   private showLiveText = false // 本次录音是否在胶囊上显示识别中的文字（D-023）
   private front: Promise<FrontAppInfo> = Promise.resolve({})
+  /** 光标前已有的文字（D-039，开启时在开口同时读取，只用于本次润色，不保存） */
+  private caretContext: Promise<string | null> = Promise.resolve(null)
   private startedAt = 0
   private pcmChunks: Int16Array[] = []
   private totalSamples = 0
@@ -112,6 +114,11 @@ export class DictationSessionManager {
     }
     // 前台应用在开口时就确定（后续用户切走窗口也不影响风格判断与历史归属）
     this.front = getFrontApp()
+    // 光标上下文（D-039）：只在开启后的听写里读光标前最多 300 字，与录音并行
+    this.caretContext =
+      mode === 'dictation' && startSettings.polishContext && startSettings.polishEnabled
+        ? getCaretContext(CONTEXT_MAX_CHARS, 0).then((c) => (c ? c.text.slice(0, c.caret) : null))
+        : Promise.resolve(null)
 
     // 改写模式：先抓选中文本（选中区在注入前一直保持）
     if (mode === 'rewrite') {
@@ -333,7 +340,14 @@ export class DictationSessionManager {
       if (mode === 'dictation') {
         if (settings.polishEnabled) {
           try {
-            finalText = await polisher.dispatch(rawText, { task: 'polish', appCategoryHint: category, words })
+            finalText = await polisher.dispatch(rawText, {
+              task: 'polish',
+              appCategoryHint: category,
+              words,
+              context: (await this.caretContext) ?? undefined,
+              styleNote: settings.styleNote,
+              samples: settings.learnStyle ? pickStyleSamples(front.name, STYLE_SAMPLES_IN_PROMPT) : undefined
+            })
           } catch (err) {
             // 听写绝不因润色失败而丢字：回退本地清理继续写入
             finalText = localPreClean(rawText)
@@ -367,7 +381,7 @@ export class DictationSessionManager {
         error = `写入失败，结果已复制到剪贴板（${pasteShortcut(process.platform)} 粘贴）`
       }
       this.record({ mode, rawText, finalText, durationMs, front, sourceText: sourceText ?? undefined, error: error ?? notice })
-      if (injectRes.ok && (mode === 'dictation' || mode === 'rewrite')) this.learn(finalText, front, settings)
+      if (injectRes.ok && (mode === 'dictation' || mode === 'rewrite')) this.learn(finalText, front, settings, mode)
       this.emit({
         state: injectRes.ok ? 'done' : 'error',
         polishedText: finalText,
@@ -387,15 +401,18 @@ export class DictationSessionManager {
     }
   }
 
-  /** 自动词典（D-012）：常用专有名词计数；写入后追踪修改 */
-  private learn(finalText: string, front: FrontAppInfo, settings: ReturnType<typeof loadSettings>): void {
+  /** 自动词典（D-012）：常用专有名词计数；写入后追踪修改；风格学习（D-040）共用同一次追踪 */
+  private learn(finalText: string, front: FrontAppInfo, settings: ReturnType<typeof loadSettings>, mode: FeatureMode): void {
     const notify = (terms: string[]) => this.broadcast(IPC.dictChanged, terms)
     try {
       if (settings.learnFrequentTerms) {
         const learned = learnFrequentTerms(finalText)
         if (learned.length) notify(learned)
       }
-      if (settings.learnFromEdits) trackEdits(finalText, front.pid, notify)
+      if (settings.learnFromEdits || settings.learnStyle) {
+        // 风格学习只学听写的结果（改写选中的结果是按指令改的，不代表个人习惯）
+        trackEdits(finalText, front, { dict: settings.learnFromEdits, style: settings.learnStyle && mode === 'dictation' }, notify)
+      }
     } catch (err) {
       console.warn('[learn] failed:', err)
     }

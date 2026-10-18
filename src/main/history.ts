@@ -2,12 +2,13 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 import Database from 'better-sqlite3'
-import type { HistoryRecord, HistoryStats } from '../shared/types'
+import type { HistoryRecord, HistoryStats, StyleSample } from '../shared/types'
 
 /**
  * M2 历史与词典存储：better-sqlite3（原创 schema）
  * - history: 听写记录
  * - dict_words: 个人词典（manual 手动 / auto 自动学习）
+ * - style_samples: 风格学习的修改记录（D-040）
  * - meta: 迁移标记等
  * 首次运行自动迁移 M1 的 history.jsonl。
  */
@@ -105,6 +106,15 @@ function open(): Database.Database {
       locked INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_meeting_segments ON meeting_segments(meeting_id, start_sample);
+
+    -- 风格学习（D-040）：写入的结果 → 用户改后的样子；只在本机，最多 STYLE_SAMPLES_MAX 条，可查看、删除
+    CREATE TABLE IF NOT EXISTS style_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at INTEGER NOT NULL,
+      app_name TEXT,
+      before_text TEXT NOT NULL,
+      after_text TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS voiceprints (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -302,4 +312,39 @@ export function historyStats(): HistoryStats {
     .prepare(`SELECT COALESCE(SUM(LENGTH(polished_text)), 0) AS c FROM history WHERE status = 'completed' AND mode != 'ask' AND created_at >= ?`)
     .get(dayStart.getTime()) as { c: number }
   return { count: all.count, totalDurationMs: all.dur, totalChars: all.chars, weekCount: week.n, todayChars: today.c }
+}
+
+// —— 风格学习（D-040）——
+
+export const STYLE_SAMPLES_MAX = 50
+
+type StyleRow = { id: number; created_at: number; app_name: string | null; before_text: string; after_text: string }
+const toSample = (r: StyleRow): StyleSample => ({ id: r.id, createdAt: r.created_at, appName: r.app_name ?? undefined, before: r.before_text, after: r.after_text })
+
+/** 保存一条修改记录（同一次写入再次读到改动时传 id 更新），超出上限删掉最旧的；返回记录 id */
+export function saveStyleSample(before: string, after: string, appName?: string, id?: number): number {
+  const d = open()
+  if (id && d.prepare(`UPDATE style_samples SET after_text = ? WHERE id = ?`).run(after, id).changes) return id
+  const res = d.prepare(`INSERT INTO style_samples (created_at, app_name, before_text, after_text) VALUES (?, ?, ?, ?)`).run(Date.now(), appName ?? null, before, after)
+  d.prepare(`DELETE FROM style_samples WHERE id NOT IN (SELECT id FROM style_samples ORDER BY created_at DESC, id DESC LIMIT ?)`).run(STYLE_SAMPLES_MAX)
+  return Number(res.lastInsertRowid)
+}
+
+export function listStyleSamples(): StyleSample[] {
+  return (open().prepare(`SELECT * FROM style_samples ORDER BY created_at DESC, id DESC`).all() as StyleRow[]).map(toSample)
+}
+
+/** 润色时用的示例：同一应用的优先，其余按时间从新到旧 */
+export function pickStyleSamples(appName: string | undefined, limit: number): StyleSample[] {
+  const all = listStyleSamples()
+  const same = appName ? all.filter((x) => x.appName === appName) : []
+  return [...same, ...all.filter((x) => !same.includes(x))].slice(0, limit)
+}
+
+export function deleteStyleSample(id: number): void {
+  open().prepare(`DELETE FROM style_samples WHERE id = ?`).run(id)
+}
+
+export function clearStyleSamples(): void {
+  open().exec(`DELETE FROM style_samples`)
 }

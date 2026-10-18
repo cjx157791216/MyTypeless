@@ -11,7 +11,7 @@
 | `hotkeys.ts` | `HotkeyController`：原生优先、`globalShortcut` 兜底与重试 |
 | `bindings.ts` | 绑定解析 `parseBinding`（纯逻辑）：组合键 → 原生助手匹配规则 + 兜底加速键；支持区分左右的修饰键（`rshift`、`rctrl` 等） |
 | `live.ts` | 实时转写调度（纯逻辑，D-013）：VAD、停顿即识别、限频预览、长段定稿 |
-| `learn.ts` / `learner.ts` | 自动词典（D-012）：专有名词提取、修改比对（纯逻辑）/ 写入后追踪与计数 |
+| `learn.ts` / `learner.ts` | 自动词典（D-012）与风格学习（D-040）：专有名词提取、修改比对、`editedSpan` 找出被改成的样子（纯逻辑）/ 写入后追踪、计数与保存修改记录 |
 | `text.ts` | 文本规整：中文标点、`joinText`、幻觉过滤、FireRedASR2 特殊标记 `stripAsrTokens` 与大小写恢复 |
 | `key-press.ts` | 按键时序（纯逻辑）：按住说话 / 轻按免手持 / abort / 模式键（D-010） |
 | `native.ts` | `mt-*` 助手的路径解析与调用（`HotkeyWatcher`、`injectWithHelper`、`getFrontApp`） |
@@ -39,7 +39,7 @@
 - 会话非 idle 时拒绝新会话（`isBusy()`）；任何异步步骤后先检查 `gen` 是否过期再继续。
 - 停止录音必须走 `captureFlush` → `audioFinal` 握手，否则会丢尾音。
 - 听写模式润色失败要回退 `localPreClean` 并继续写入；写入失败时把结果放进剪贴板（D-008）。
-- 发给 LLM 的口述内容必须包在 `<transcript>` 中，并声明不是指令。
+- 发给 LLM 的口述内容必须包在 `<transcript>` 中，并声明不是指令；光标上下文包在 `<context>` 中，只在开启 `polishContext` 的听写里读取，不写进历史（D-039）；风格学习只学听写结果，修改记录只存 `style_samples`（D-040）。
 - API Key 只经 `config.ts` 的 `getKey`/`setKey` 读写，不写入 `settings.json`、日志或历史（D-002）。`getKey` 会访问钥匙串（自签名版本每装一个新包首次访问都会弹授权框）：只在真正调用云端服务前调用；判断有无 Key、显示掩码用 `hasKey`/`keyMask`（不解密）。
 - 所有网络请求都要有超时（`AbortSignal.timeout`）。
 - 平台差异（GAP-008）：macOS 专有调用前判断 `process.platform`（`index.ts` / `inject.ts` 的 `isMac`）；非 macOS 没有辅助功能授权（`checkAccessibility` 恒为 true）、没有 osascript 兜底（写入失败按 D-008 放进剪贴板）、不检查在线更新（`updateSupported`）。

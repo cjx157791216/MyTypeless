@@ -3,9 +3,9 @@
 //       mt-focus --activate <pid>      → 把该进程的应用切回前台（AI 回答浮卡“插入到光标”前归还焦点）
 //       mt-focus --selected-text       → 焦点输入框中选中文字的 base64（辅助功能 API，不碰剪贴板）；
 //                                         没有选中 / 应用不支持时退出码 5，无辅助功能权限退出码 3
-//       mt-focus --caret-context <前> <后> → 光标前后各若干字符的文字（自动词典追踪修改用，D-012）：
+//       mt-focus --caret-context <前> <后> → 光标前后各若干字符的文字（追踪修改 D-012、风格学习 D-040、润色上下文 D-039）：
 //                                         {"text":"…","caret":<光标在 text 中的位置>,"pid":<前台应用 pid>}；
-//                                         只输出这一段，输入框其余内容不离开本助手；不支持时退出码 5
+//                                         只输出这一段，输入框其余内容不离开本助手；密码框、不支持时退出码 5
 // 权限: 前两个用法无需辅助功能；--selected-text 需要。
 
 import AppKit
@@ -54,9 +54,17 @@ if args.count == 1, args[0] == "--selected-text" {
     exit(0)
 }
 
+/// 密码框（AXSecureTextField）一律不读（D-039）
+func isSecureField(_ field: AXUIElement) -> Bool {
+    var subrole: CFTypeRef?
+    if AXUIElementCopyAttributeValue(field, kAXSubroleAttribute as CFString, &subrole) == .success,
+       let s = subrole as? String, s == (kAXSecureTextFieldSubrole as String) { return true }
+    return false
+}
+
 if args.count == 3, args[0] == "--caret-context", let before = Int(args[1]), let after = Int(args[2]) {
     guard AXIsProcessTrusted() else { exit(3) }
-    guard let field = focusedElement() else { exit(5) }
+    guard let field = focusedElement(), !isSecureField(field) else { exit(5) }
     var rangeRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(field, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
           let rv = rangeRef, CFGetTypeID(rv) == AXValueGetTypeID() else { exit(5) }

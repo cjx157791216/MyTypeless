@@ -109,6 +109,11 @@ const api = {
     remove: (id: number) => ipcRenderer.invoke(IPC.voiceprintDelete, id),
     model: (action: 'download' | 'cancel' | 'remove') => ipcRenderer.invoke(IPC.speakerModelAction, action)
   },
+  styleSamples: {
+    list: () => ipcRenderer.invoke(IPC.styleSampleList),
+    remove: (id: number) => ipcRenderer.invoke(IPC.styleSampleDelete, id),
+    clear: () => ipcRenderer.invoke(IPC.styleSampleClear)
+  },
   system: {
     checkPermissions: () => ipcRenderer.invoke(IPC.checkPermissions),
     appInfo: () => ipcRenderer.invoke(IPC.appInfo),

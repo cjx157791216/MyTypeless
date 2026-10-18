@@ -15,6 +15,10 @@ export interface EvalCase {
   ideal: string
   category?: string
   words?: string[]
+  /** 个性化（D-039、D-040）：只有新提示词支持 */
+  context?: string
+  styleNote?: string
+  samples?: Array<{ before: string; after: string }>
   must?: string[]
   mustNot?: string[]
   maxRatio?: number
@@ -89,7 +93,8 @@ async function main(): Promise<void> {
       // 与 LlmPolisher.polish 相同：先本地去语气词，输出过长时退回本地清理
       const pre = stripFillers(c.input)
       const opts = { appCategoryHint: c.category, words: c.words }
-      const { system, user } = variant === 'current' ? buildPolishPrompt(pre, opts) : baselinePrompt(pre, opts)
+      const { system, user } =
+        variant === 'current' ? buildPolishPrompt(pre, { ...opts, context: c.context, styleNote: c.styleNote, samples: c.samples }) : baselinePrompt(pre, opts)
       const t0 = Date.now()
       let output: string
       try {

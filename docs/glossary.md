@@ -37,6 +37,9 @@
 | 中文输出 | `asr.chineseScript` | 内置引擎中文结果的字形：跟随系统 / 简体 / 繁体 / 不转换 | [pipeline.md](requirements/pipeline.md) |
 | 原话 | `rawText` | 语音识别直接输出、未经处理的文本 | [ipc.md](contracts/ipc.md) |
 | 润色 | `polish`、`LlmPolisher` | 用 LLM 把原话整理成书面文字（含翻译、改写、提问的 LLM 调用） | [pipeline.md](requirements/pipeline.md) |
+| 光标上下文 | `polishContext`、`caretContext` | 听写时光标前最多 300 字，开启后作为润色参考发给 LLM，不保存 | D-039 |
+| 风格学习 / 修改记录 | `learnStyle`、`style_samples`、`StyleSample` | 写入后被用户改过的听写结果（写入 → 改后），润色时作示例 | D-040 |
+| 个人风格说明 | `styleNote` | 用户手写的润色要求，随润色请求发送 | D-040 |
 | 润色评测集 | `polish-eval.json`、`scripts/polish-eval.ts` | 原创的识别原文与检查条件，用真实模型对比新旧润色提示词 | D-038 |
 | 本地清理 | `localPreClean` | 不调用 LLM 的规则清理：去填充词、保守的改口折叠 | [pipeline.md](requirements/pipeline.md) |
 | 结果 | `polishedText` | 会话最终投递的文本（润色、译文、改写结果或回答） | [ipc.md](contracts/ipc.md) |

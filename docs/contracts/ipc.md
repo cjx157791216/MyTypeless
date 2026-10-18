@@ -50,6 +50,7 @@
 | `meetingExport` | `meeting.exportMarkdown(id)` | 保存对话框，写出纪要 + 完整记录的 Markdown → `boolean` |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |
 | `voiceprintList` / `voiceprintRename` / `voiceprintDelete` | `voiceprints.list/rename/remove` | → 最新 `Voiceprint[]`；改名同步到关联的说话人，删除立即生效（D-016） |
+| `styleSampleList` / `styleSampleDelete` / `styleSampleClear` | `styleSamples.list/remove/clear` | → 最新 `StyleSample[]`（从新到旧）；删除、清空立即生效（D-040） |
 | `answerInsert` | `system.answerInsert(text)` | 隐藏浮卡 → 激活提问时的前台应用 → 粘贴 → `boolean` |
 | `checkPermissions` | `system.checkPermissions()` | → `PermissionStatus { accessibility, microphone, nativeHotkey, permissionHost?, fnKeyConflict }`（开发模式下 `permissionHost` 为实际持有权限的终端应用；`fnKeyConflict` 表示快捷键用到 Fn 但系统 🌐 键不是「无操作」）；非 macOS：`accessibility` 恒为 true，`permissionHost` 为空，`fnKeyConflict` 为 false |
 | `openPermissionSettings` | `system.openPermissionSettings()` | 弹系统授权提示并打开辅助功能设置 |

@@ -357,6 +357,24 @@
             </div>
           </div>
 
+          <!-- 润色个性化（D-039、D-040）：默认关闭，开启时确认 -->
+          <div class="settings-group" id="settings-personal">
+            <h2>润色个性化</h2>
+            <div class="card">
+              <label class="check"><input id="polish-context" type="checkbox" /> 参考光标前的文字：听写时读取光标前最多 300 字，随这次润色请求发给上面配置的模型，帮它接上半句话、统一称呼和术语写法（不保存；密码框不读）</label>
+              <label class="check"><input id="learn-style" type="checkbox" /> 学习我的修改习惯：听写写入后你又改过的，保存为“写入 → 改后”（只存本机，最多 50 条），润色时挑最近几条发给模型参考</label>
+              <label>个人风格说明
+                <textarea id="style-note" rows="3" maxlength="500" placeholder="例如：句末不加句号；称呼同事用“你”不用“您”；英文术语保持英文"></textarea>
+              </label>
+              <div class="hint">风格说明写好后自动保存，开启 AI 润色时随每次请求发给模型。</div>
+              <div class="style-head">
+                <h3>修改记录</h3>
+                <button id="btn-style-clear" class="btn mini danger">清空</button>
+              </div>
+              <div id="style-sample-list" class="style-sample-list"></div>
+            </div>
+          </div>
+
           <div class="settings-group">
             <h2>听写与麦克风</h2>
             <div class="card">

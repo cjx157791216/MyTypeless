@@ -158,3 +158,50 @@ export function learnableFromCorrection(c: Correction): LearnCandidate | null {
   }
   return null
 }
+
+/** 风格学习：光标停在改动后面不远（末尾追加了几个字，如表情、语气词）时，把这几个字也算进修改 */
+const APPEND_MAX = 8
+
+/**
+ * 风格学习（D-040）：在光标附近读到的文字里找出写入的那一段被用户改成了什么样。
+ * 半全局对齐（写入内容整体对齐到读到文字中的一段，两端的无关上下文不计代价），取编辑距离最小、最靠后的一段；
+ * 改动超过写入内容的一半（整段重写 / 光标已离开）或没有改动时返回 null。caret 为光标在 current 中的 UTF-16 位置。
+ */
+export function editedSpan(inserted: string, current: string, caret: number): string | null {
+  const a = [...inserted.trim()]
+  const b = [...current]
+  const n = a.length
+  const m = b.length
+  if (!n || !m || n > 400 || m > 600) return null
+  // d[i][j]：a 的前 i 个字对齐到 b 中以 j 结尾的一段的最小编辑距离；s[i][j]：该段在 b 中的起点
+  let prevD = new Int32Array(m + 1)
+  let prevS = new Int32Array(m + 1)
+  for (let j = 0; j <= m; j++) prevS[j] = j
+  for (let i = 1; i <= n; i++) {
+    const d = new Int32Array(m + 1)
+    const s = new Int32Array(m + 1)
+    d[0] = i
+    for (let j = 1; j <= m; j++) {
+      let best = prevD[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      let start = prevS[j - 1]
+      if (prevD[j] + 1 < best) (best = prevD[j] + 1), (start = prevS[j])
+      if (d[j - 1] + 1 < best) (best = d[j - 1] + 1), (start = s[j - 1])
+      d[j] = best
+      s[j] = start
+    }
+    prevD = d
+    prevS = s
+  }
+  let end = 0
+  for (let j = 1; j <= m; j++) if (prevD[j] <= prevD[end]) end = j
+  const dist = prevD[end]
+  const start = prevS[end]
+  if (dist > n * 0.5 || end <= start) return null
+  // 光标在这一段后面不远：末尾追加的几个字（不跨行）也算修改
+  const caretAt = [...current.slice(0, Math.max(0, caret))].length
+  let stop = end
+  if (caretAt > end && caretAt - end <= APPEND_MAX && !b.slice(end, caretAt).includes('\n')) stop = caretAt
+  const after = b.slice(start, stop).join('').trim()
+  if (!after || after === a.join('')) return null
+  return after
+}
