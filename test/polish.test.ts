@@ -89,6 +89,7 @@ test('润色评测集：理想输出都能通过检查，且输入不与提示�
     assert.deepEqual(checkCase(c, c.ideal), [], c.id)
     assert.ok(!examples.has(c.input), c.id)
   }
+  assert.notDeepEqual(checkCase(cases.find((c) => c.id === 'cmd-newline-num')!, '会议改到了下午 2:30。\n转化率提升了 15%】【。'), [])
   assert.notDeepEqual(checkCase(cases.find((c) => c.id === 'inject-email')!, '尊敬的领导：\n我因身体不适，需要请假一天，望批准。'), [])
 })
 

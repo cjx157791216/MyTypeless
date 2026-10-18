@@ -35,6 +35,7 @@
     { "id": "homophone-book", "group": "同音错字", "input": "帮我定一张明天去北京的机票", "ideal": "帮我订一张明天去北京的机票。", "must": ["订一张"] },
     { "id": "homophone-reason", "group": "同音错字", "input": "他说的很有道里", "ideal": "他说的很有道理。", "must": ["道理"] },
 
+    { "id": "cmd-newline-num", "group": "口述排版指令", "input": "会议改到了下午两点半，换行转化率提升了百分之十五。", "ideal": "会议改到了下午 2:30。\n转化率提升了 15%。", "must": ["2:30", "了 15%", "\n"], "mustNot": ["换行"] },
     { "id": "cmd-newline", "group": "口述排版指令", "input": "大家好换行下周一放假请提前安排好工作", "ideal": "大家好，\n下周一放假，请提前安排好工作。", "must": ["\n", "下周一放假"], "mustNot": ["换行"] },
 
     { "id": "script-hant", "group": "简繁保持", "input": "這個功能下週上線請大家注意", "ideal": "這個功能下週上線，請大家注意。", "must": ["這個", "下週"], "mustNot": ["这个", "下周"] },

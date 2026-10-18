@@ -25,6 +25,8 @@ export function checkCase(c: EvalCase, output: string): string[] {
   const fails: string[] = []
   for (const s of c.must ?? []) if (!output.includes(s)) fails.push(`缺少「${s.replace(/\n/g, '\\n')}」`)
   for (const s of c.mustNot ?? []) if (output.includes(s)) fails.push(`不应出现「${s}」`)
+  // 原文没有的括号：模型生成的杂字（实测 gpt-5.6-terra 曾在句末输出“】【”）
+  for (const ch of ['【', '】', '[', ']']) if (output.includes(ch) && !c.input.includes(ch)) fails.push(`多出原文没有的「${ch}」`)
   const ratio = c.maxRatio ?? 2
   if (output.length > c.input.length * ratio) fails.push(`输出过长（${output.length} 字 > 原文 ${c.input.length} 字 × ${ratio}）`)
   return fails
