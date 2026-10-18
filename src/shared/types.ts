@@ -108,11 +108,15 @@ export type MeetingSource = 'mic' | 'mixed' | 'app'
 export type MeetingTrack = 0 | 1
 
 /** 可截取声音的正在运行的应用（mt-audiotap --apps） */
+/** 能语音通话的软件 / 浏览器（网页会议）/ 其他应用（D-033，`src/main/meeting/call-apps.ts`） */
+export type AudioAppKind = 'call' | 'browser' | 'other'
+
 export interface AudioApp {
   bundleId: string
   name: string
   audio: boolean // 已连接音频（开过声音）
   output: boolean // 此刻正在发声
+  kind: AudioAppKind
 }
 
 /** 应用版本信息：version 来自 package.json；build 为打包时间 YYYYMMDD.HHmm（开发运行为 dev）；commit 为 git 短哈希 */
