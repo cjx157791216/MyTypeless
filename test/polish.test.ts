@@ -176,14 +176,15 @@ test('LlmPolisher.complete：流式接收，模型一直在输出（含思考过
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     let n = 0
     const t = setInterval(() => {
-      if (++n <= 8) return void sse(res, { reasoning_content: '…' })
+      if (++n <= 16) return void sse(res, { reasoning_content: '…' })
       clearInterval(t)
       sse(res, { content: '纪要正文' })
       res.end('data: [DONE]\n\n')
     }, 40)
   })
   try {
-    assert.equal(await llmFor(srv.url, 150).complete('s', 'u'), '纪要正文') // 共约 360ms > 150ms
+    // 共约 680ms > 400ms；每段间隔 40ms，比超时短很多（CI 机器较慢时计时器会延迟）
+    assert.equal(await llmFor(srv.url, 400).complete('s', 'u'), '纪要正文')
   } finally {
     srv.close()
   }
