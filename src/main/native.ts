@@ -4,11 +4,12 @@ import { existsSync } from 'fs'
 import { app } from 'electron'
 
 /**
- * 原生助手管理（原创 Swift CLI，位于 native/bin/）
- * - mt-hotkey: CGEventTap 全局快捷键（按住说话/触发切换），事件走 stdout JSON 行
- * - mt-inject: 文本注入（CGEvent 键入 / --paste 粘贴）
- * - mt-focus:  前台应用探测（bundleId + name）
- * 打包后位于 resources/bin/（electron-builder extraResources）。Windows 版助手同名、带 .exe，协议相同。
+ * 原生助手管理（原创 CLI，macOS 为 Swift、Windows 为 C++，编译到 native/bin/）
+ * - mt-hotkey: 全局快捷键（按住说话/触发切换），事件走 stdout JSON 行
+ * - mt-inject: 文本写入（键入 / --paste 粘贴 / --combo 组合键 / --copy-selection 抓选区）
+ * - mt-focus:  前台应用探测、激活、读选中文字与光标上下文
+ * - mt-text:   繁简转换
+ * 打包后位于 resources/bin/（electron-builder extraResources）。Windows 版助手同名、带 .exe，协议相同（docs/contracts/native-helpers.md）。
  */
 
 export interface HotkeyEvent {

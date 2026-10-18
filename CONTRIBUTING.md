@@ -15,7 +15,7 @@
 - 首次：`npm install` → `npm run native` → `npm run whisper` → `npm run diarize` → `npm run dev`
 - 开发模式下辅助功能 / 麦克风权限属于运行 `npm run dev` 的终端应用
 
-### Windows（移植进行中）
+### Windows
 
 - Windows 10/11 x64、Node.js 24、Visual Studio 2022 生成工具（“使用 C++ 的桌面开发”，编译 Windows 原生助手时需要）
 - **不要直接 `npm install`**，用 `npm run setup:win`：跳过 better-sqlite3 按 Node 编译的步骤、直接下载 Electron 版预编译包，并修正 Electron 解压不完整的问题。网络慢时先设置 `ELECTRON_MIRROR`（如 `https://npmmirror.com/mirrors/electron/`）
@@ -23,7 +23,7 @@
 - `npm run diarize:win` 另外编译 `mt-diarize`（中文 / 英文内置识别、会议声纹，首次下载 sherpa-onnx 静态库约 120MB）
 - `npm run whisper:win` 编译 `mt-whisper`（多语种识别，whisper.cpp 源码，需要 git；只用 CPU）
 - Windows 默认主键是右 Ctrl（按住约 0.15 秒开始说话、轻按免手持；右 Ctrl+空格 提问；右 Ctrl+Shift 翻译）。没有右 Ctrl 的键盘在设置里改为 `rshift`（翻译 `rshift+ctrl`，右 Shift+字母照常打大写）或 `ralt`
-- 提交前同样跑 `npm run typecheck`、`npm run test`、`npm run build`、`npm run docs:check`（CI 有 Windows job）
+- 提交前同样跑 `npm run typecheck`、`npm run test`、`npm run build`、`npm run docs:check`（CI 的 macOS 与 Windows 两个 job 都必须通过才能合并）
 - `npm run dist` 在 Windows 上打包为 `release/MyTypeless-<版本>-<构建号>-x64.exe`（一键安装到当前用户，不签名）；没有 Windows 电脑时可在 Actions 页面手动运行 `release-windows`（标签留空），从构建产物下载安装包
 
 ## 提交流程

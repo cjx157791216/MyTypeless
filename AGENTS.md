@@ -48,7 +48,7 @@ MyTypeless：macOS 上的 AI 语音听写工具（Electron + TypeScript + Swift 
 | `scripts/` | 原生编译、图标生成、文档脚本 `doc-kit/` | — |
 | `build/` | 打包资源：应用图标、entitlements | — |
 | `docs/` | 需求、决策、契约、验收与治理 | [AGENTS.md](docs/AGENTS.md) |
-| `.github/` | CI（`workflows/ci.yml`：macOS 上 typecheck / test / build / docs:check / native；Windows 上 diarize:win / whisper:win / typecheck / test / build；`release-windows.yml`：发布时打 Windows 安装包，D-036）、Issue 与 PR 模板 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| `.github/` | CI（`workflows/ci.yml`：macOS 上 native / typecheck / test / build / docs:check；Windows 上 diarize:win / whisper:win / typecheck / test / build，两个 job 都是合并前必须通过的检查；`release-windows.yml`：发布时打 Windows 安装包，D-036）、Issue 与 PR 模板 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 常见改动的完整步骤见 [docs/development/recipes.md](docs/development/recipes.md)。
 
@@ -114,7 +114,7 @@ npm run docs:check
 
 ## 代码协作（GitHub）
 
-- 仓库 `cjx157791216/MyTypeless`（公开，D-031）。`main` 受保护：只能经 PR 合并、CI（`.github/workflows/ci.yml` 的 `check`）必须通过、不能强推；合并方式只有 squash。
+- 仓库 `cjx157791216/MyTypeless`（公开，D-031）。`main` 受保护：只能经 PR 合并、CI（`.github/workflows/ci.yml` 的 `check` 与 `check-windows`）必须通过、不能强推；合并方式只有 squash。
 - 每项改动从最新 `main` 开分支（`feat/…`、`fix/…`、`docs/…`、`ci/…`），只提交本任务的文件（工作区里可能有其他任务未提交的改动），推送后开 PR，CI 通过再合并；PR 描述写改了什么、为什么、怎么验证、关联的 D/GAP 编号。
 - 外部贡献者从 fork 提 PR；涉及隐私、合规、数据兼容的改动先开 Issue（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
 - 远端 `gitlab` 是迁移前的私有存档（含开源前的完整历史），只读，不再推送。
@@ -139,4 +139,4 @@ AI 可以自主完成设计细化、编码、测试和文档同步。以下事�
 
 ## 完成标准
 
-功能“完成”需要以下自动检查全部通过：`npm run typecheck`、`npm run test`、`npm run build`、`npm run docs:check`。改了 `native/*.swift` 时还需 `npm run native` 编译通过。真机验证（快捷键、写入其他应用）不是完成条件，但未验证的项要在 [缺口账本](docs/implementation/gap-ledger.md) 中标为 `DONE_PENDING_REVIEW`。
+功能“完成”需要以下自动检查全部通过：`npm run typecheck`、`npm run test`、`npm run build`、`npm run docs:check`。改了 `native/*.swift` 时还需 `npm run native` 编译通过；改了 `native/win/` 时需 CI 的 `check-windows`（或 Windows 上 `npm run native:win`）编译与测试通过。改原生协议时，契约、Swift 与 C++ 两份实现、`test/native-helpers.test.ts` 在同一个 PR 里一起改。真机验证（快捷键、写入其他应用）不是完成条件，但未验证的项要在 [缺口账本](docs/implementation/gap-ledger.md) 中标为 `DONE_PENDING_REVIEW`。

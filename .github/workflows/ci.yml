@@ -19,13 +19,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # 先编译 Swift 助手：test/native-helpers.test.ts 要用它们验证与 Windows 版相同的协议
+      - run: npm run native
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
       - run: npm run docs:check
-      - run: npm run native
 
-  # Windows 移植（GAP-008）：只检查跨平台部分；跳过安装脚本（Electron 本体与 better-sqlite3 二进制在这几步用不到）
+  # Windows 移植（GAP-008）：编译 Windows 助手并跑协议测试、typecheck、test、build；跳过安装脚本（Electron 本体与 better-sqlite3 二进制在这几步用不到）
   check-windows:
     runs-on: windows-latest
     steps:
@@ -39,7 +40,7 @@ jobs:
         with:
           path: .vendor/sherpa-onnx-win
           key: sherpa-onnx-win-${{ hashFiles('scripts/build-native-win.cjs') }}
-      - run: npm run diarize:win
+      - run: npm run diarize:win # 编译全部 Windows 助手（含 mt-diarize，首次下载 sherpa-onnx 静态库）
       # 内置识别引擎（whisper.cpp 源码编译约几分钟）：缓存源码、构建目录与产物，版本不变就跳过
       - uses: actions/cache@v4
         with:
@@ -48,7 +49,7 @@ jobs:
             native/bin/mt-whisper.exe
             native/bin/.mt-whisper-win-version
           key: whisper-win-${{ hashFiles('scripts/build-whisper-win.cjs') }}
-      - run: npm run whisper:win # 编译全部 Windows 助手（含 mt-diarize，首次下载 sherpa-onnx 静态库）
+      - run: npm run whisper:win
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build

@@ -1,6 +1,6 @@
 # 原生助手契约（主进程 ↔ `mt-*`）
 
-助手是独立 CLI 进程，源码在 `native/`（`mt-whisper` 来自第三方 whisper.cpp，见下文），编译到 `native/bin/`，打包后位于 `MyTypeless.app/Contents/Resources/bin/`。路径解析：`src/main/native.ts` 的 `helperPath`（Windows 版助手同名、带 `.exe`，协议与本文相同；移植进度见 GAP-008）。辅助功能权限归属于启动它们的 app。
+助手是独立 CLI 进程，源码在 `native/`（`mt-whisper` 来自第三方 whisper.cpp，见下文），编译到 `native/bin/`，打包后位于 `MyTypeless.app/Contents/Resources/bin/`。路径解析：`src/main/native.ts` 的 `helperPath`（Windows 版助手同名、带 `.exe`，协议与本文相同，两边共同的参数与退出码由 `test/native-helpers.test.ts` 在两个平台上验证）。辅助功能权限归属于启动它们的 app。
 
 ## 通用退出码
 
@@ -10,7 +10,9 @@
 | 2 | 参数/配置错误 |
 | 3 | 未授予辅助功能权限 |
 | 4 | 操作失败 |
-| 5 | 没有选中文本（仅 `mt-inject --copy-selection`） |
+| 5 | 没有选中文本 / 读不到文字（`mt-inject --copy-selection`、`mt-focus --selected-text` / `--caret-context`） |
+
+参数先于权限校验：参数错误一律退出码 2，即使没有辅助功能权限；参数合法后才检查权限（3）。
 
 ## mt-hotkey（常驻）
 
@@ -29,7 +31,7 @@
 | --- | --- |
 | `mt-inject <base64>` | 以 Unicode 键盘事件键入文本（16 字符一块，修饰键标志清空） |
 | `mt-inject --paste <base64>` | 备份剪贴板全部类型 → 写入文本 → ⌘V → 约 0.45 秒后恢复（期间剪贴板被他人改过则不恢复） |
-| `mt-inject --combo cmd+c` | 发送组合键（字母、`return`、`space`） |
+| `mt-inject --combo cmd+c` | 发送组合键（字母、`return`、`space`；修饰键 `cmd`、`opt`、`ctrl`、`shift`）；有不认识的键或修饰键时退出码 2，不发送任何按键 |
 | `mt-inject --copy-selection` | ⌘C 后等待剪贴板变化（≤600ms），stdout 输出选中文本的 base64，并完整恢复剪贴板；没有选中时退出码 5 |
 
 `base64` 为 UTF-8 文本。主进程降级链（`src/main/inject.ts`）：`auto` 模式下 ≤160 字且无换行时先键入，否则直接粘贴；原生粘贴失败再退 osascript 粘贴。
@@ -84,12 +86,12 @@ whisper.cpp（MIT）`whisper-server` 的静态编译版，由 `scripts/build-whi
 | --- | --- |
 | `mt-focus` | stdout：`{"bundleId","name","pid"}`，取不到时为 `{}` |
 | `mt-focus --activate <pid>` | 把该进程的应用切到前台；进程不存在退出码 2 |
-| `mt-focus --caret-context <前> <后>` | 光标前后各若干字符：`{"text","caret","pid"}`；优先按范围读取（`AXStringForRange`），不支持时读出后只截这一段输出；读不到退出码 5；密码框（`AXSecureTextField`）退出码 5；需要辅助功能权限（D-012 追踪修改、D-040 润色上下文、D-041 风格学习） |
+| `mt-focus --caret-context <前> <后>` | `前`、`后` 为非负整数且不能都是 0（否则退出码 2）；光标前后各若干字符：`{"text","caret","pid"}`；优先按范围读取（`AXStringForRange`），不支持时读出后只截这一段输出；读不到退出码 5；密码框（`AXSecureTextField`）退出码 5；需要辅助功能权限（否则退出码 3；D-012 追踪修改、D-040 润色上下文、D-041 风格学习） |
 | `mt-focus --selected-text` | 焦点元素的 `AXSelectedText`（base64）；没有选中或应用不支持时退出码 5；需要辅助功能权限（否则退出码 3）；单次辅助功能调用超时 0.3 秒 |
 
 两个读文字的用法找焦点元素时先问系统焦点；问不到（Electron / Chromium 应用默认不公开辅助功能树，返回 -25204）时改问前台应用自己的焦点元素，仍问不到则对该应用设置 `AXManualAccessibility = true`（Electron 提供的开关，让它建立辅助功能树）后再问一次。读到的仍只是光标附近这一段 / 选中的文字。
 
-前两个用法不需要辅助功能权限。
+前两个用法不需要辅助功能权限。未知参数退出码 2。
 
 ## Windows 版（GAP-008）
 

@@ -57,17 +57,21 @@ func modifierKeycodeAndFlag(_ s: String) -> (CGKeyCode, CGEventFlags)? {
     }
 }
 
-func postCombo(_ combo: String) -> Bool {
+/// "cmd+shift+v" → 键码与修饰键；有不认识的部分时返回 nil（不发送任何按键，退出码 2）
+func parseCombo(_ combo: String) -> (key: CGKeyCode, mods: [(CGKeyCode, CGEventFlags)])? {
     let parts = combo.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
-    guard let last = parts.last, let keyCode = keycodeForLetter(last) else { return false }
+    guard let last = parts.last, let keyCode = keycodeForLetter(last) else { return nil }
     var mods: [(CGKeyCode, CGEventFlags)] = []
-    var flags: CGEventFlags = []
     for m in parts.dropLast() {
-        if let pair = modifierKeycodeAndFlag(m) {
-            mods.append(pair)
-            flags.insert(pair.1)
-        }
+        guard let pair = modifierKeycodeAndFlag(m) else { return nil }
+        mods.append(pair)
     }
+    return (keyCode, mods)
+}
+
+func postCombo(_ keyCode: CGKeyCode, _ mods: [(CGKeyCode, CGEventFlags)]) {
+    var flags: CGEventFlags = []
+    for (_, f) in mods { flags.insert(f) }
     for (kc, _) in mods {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true)
         e?.post(tap: .cghidEventTap)
@@ -85,7 +89,6 @@ func postCombo(_ combo: String) -> Bool {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: false)
         e?.post(tap: .cghidEventTap)
     }
-    return true
 }
 
 var combo: String? = nil
@@ -101,6 +104,20 @@ while i < args.count {
     else if a == "--combo", i + 1 < args.count { combo = args[i + 1]; i += 1 }
     else { b64 = a }
     i += 1
+}
+
+// 参数先校验（错误退出码 2，与 Windows 版一致），再检查权限
+var parsedCombo: (key: CGKeyCode, mods: [(CGKeyCode, CGEventFlags)])? = nil
+var text = ""
+if let combo = combo {
+    guard let c = parseCombo(combo) else { exit(2) }
+    parsedCombo = c
+} else if !copySelection {
+    guard let rawData = Data(base64Encoded: b64), let t = String(data: rawData, encoding: .utf8), !t.isEmpty else {
+        FileHandle.standardError.write("usage: mt-inject [--paste] <base64> | --combo cmd+c | --copy-selection\n".data(using: .utf8)!)
+        exit(2)
+    }
+    text = t
 }
 
 if !AXIsProcessTrusted() {
@@ -187,7 +204,7 @@ func copySelectedText() -> String? {
     let pb = NSPasteboard.general
     let backup = snapshotPasteboard(pb)
     let before = pb.changeCount
-    _ = postCombo("cmd+c")
+    postCombo(8, [(55, .maskCommand)]) // ⌘C
     var text: String? = nil
     var changed = false
     for _ in 0..<30 {
@@ -206,19 +223,15 @@ func copySelectedText() -> String? {
     return text
 }
 
-if let combo = combo {
-    exit(postCombo(combo) ? 0 : 2)
+if let c = parsedCombo {
+    postCombo(c.key, c.mods)
+    exit(0)
 }
 
 if copySelection {
     guard let t = copySelectedText(), !t.isEmpty else { exit(5) }
     print(Data(t.utf8).base64EncodedString())
     exit(0)
-}
-
-guard let rawData = Data(base64Encoded: b64), let text = String(data: rawData, encoding: .utf8), !text.isEmpty else {
-    FileHandle.standardError.write("usage: mt-inject [--paste] <base64> | --combo cmd+c | --copy-selection\n".data(using: .utf8)!)
-    exit(2)
 }
 
 if usePaste {

@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-// Windows 原生助手（GAP-008）的协议测试：只在 Windows 且已 npm run native:win 时运行
+// Windows 原生助手（GAP-008）独有的协议测试：只在 Windows 且已 npm run native:win 时运行；两个平台共同的部分见 native-helpers.test.ts
 const bin = (name: string) => join(import.meta.dirname, '..', 'native', 'bin', `${name}.exe`)
 const skip = process.platform !== 'win32' || !existsSync(bin('mt-inject')) ? '需要 Windows 与 npm run native:win' : false
 
@@ -12,48 +12,6 @@ function run(name: string, args: string[], input = '') {
   const r = spawnSync(bin(name), args, { input: Buffer.from(input, 'utf-8'), timeout: 5000 })
   return { code: r.status, out: r.stdout.toString('utf-8') }
 }
-
-test('mt-text：繁简互转，UTF-8 进出，换行原样保留', { skip }, () => {
-  assert.deepEqual(run('mt-text', ['--to', 'hans'], '會議記錄\n第二行'), { code: 0, out: '会议记录\n第二行' })
-  assert.deepEqual(run('mt-text', ['--to', 'hant'], '会议记录'), { code: 0, out: '會議記錄' })
-  assert.deepEqual(run('mt-text', ['--to', 'hans'], 'Hello 123'), { code: 0, out: 'Hello 123' })
-})
-
-test('mt-text：参数错误退出码 2，空输入输出为空', { skip }, () => {
-  assert.equal(run('mt-text', ['--to', 'xx']).code, 2)
-  assert.equal(run('mt-text', []).code, 2)
-  assert.deepEqual(run('mt-text', ['--to', 'hans'], ''), { code: 0, out: '' })
-})
-
-test('mt-focus：输出前台应用 JSON（没有前台窗口时为 {}）', { skip }, () => {
-  const r = run('mt-focus', [])
-  assert.equal(r.code, 0)
-  const info = JSON.parse(r.out) as { bundleId?: string; name?: string; pid?: number }
-  if (info.pid !== undefined) {
-    assert.ok(info.pid > 0)
-    assert.match(info.bundleId ?? '', /^[^A-Z]+$/) // 小写 exe 文件名
-    assert.ok(info.name)
-  }
-})
-
-// --selected-text / --caret-context 会真的读当前焦点输入框（可能是用户正在用的编辑器），这里只测参数；
-// 读取本身用自建窗口端到端验证（见运行记录）
-test('mt-focus：激活不存在的进程、参数错误退出码 2', { skip }, () => {
-  assert.equal(run('mt-focus', ['--activate', '4294967']).code, 2)
-  assert.equal(run('mt-focus', ['--activate', 'abc']).code, 2)
-  assert.equal(run('mt-focus', ['--bogus']).code, 2)
-  assert.equal(run('mt-focus', ['--caret-context', '-1', '5']).code, 2)
-  assert.equal(run('mt-focus', ['--caret-context', '0', '0']).code, 2)
-})
-
-// mt-inject 只测不会发出按键的路径；真实键入 / 粘贴 / 抓选区需要桌面，见运行记录里的隔离窗口端到端测试
-test('mt-inject：参数错误、非法 base64、不支持的组合键退出码 2（不发送任何按键）', { skip }, () => {
-  assert.equal(run('mt-inject', []).code, 2)
-  assert.equal(run('mt-inject', ['@@@']).code, 2)
-  assert.equal(run('mt-inject', ['--paste']).code, 2)
-  assert.equal(run('mt-inject', ['--combo', 'ctrl+f13']).code, 2)
-  assert.equal(run('mt-inject', ['--combo', 'hyper+c']).code, 2)
-})
 
 // mt-hotkey 的状态机用 --replay 测（不安装钩子）：物理按键无法由程序模拟，钩子本身需要真机验收。
 // "tick" = 单修饰键按住满 HOLD_MS（150ms）
@@ -113,14 +71,6 @@ test('mt-hotkey：配置错误或只有 fn 时退出码 2', { skip }, () => {
   assert.equal(run('mt-hotkey', [JSON.stringify({ matches: [{ name: 'dictation', key: 'fn' }] }), '--replay']).code, 2)
 })
 
-// mt-diarize（npm run diarize:win）：不带模型只测参数与模型加载失败；降噪 / 识别需要下载模型，见运行记录
-const skipDiarize = process.platform !== 'win32' || !existsSync(bin('mt-diarize')) ? '需要 Windows 与 npm run diarize:win' : false
-
-test('mt-diarize：没有任何模型参数退出码 2；模型文件不存在退出码 4', { skip: skipDiarize }, () => {
-  assert.equal(run('mt-diarize', []).code, 2)
-  assert.equal(run('mt-diarize', ['--denoiser', join(import.meta.dirname, '不存在 的模型.onnx')]).code, 4)
-})
-
 test('mt-hotkey：配置字符串以反斜杠结尾、或 Unicode 转义不足 4 位时判为配置错误（退出码 2），不越界读取', { skip }, () => {
   const bs = String.fromCharCode(92) // 反斜杠
   assert.equal(run('mt-hotkey', [`{"matches":[{"name":"a${bs}`, '--replay']).code, 2)
@@ -164,7 +114,7 @@ test('mt-whisper：加载模型后 /health 就绪（与主进程相同的启动�
 })
 
 // mt-audiotap（线上会议截取应用声音，D-033）：只测不依赖播放声音的部分；真实截取见运行记录里的端到端测试
-test('mt-audiotap：--apps / --list 输出 JSON 数组；参数错误退出码 2', { skip }, () => {
+test('mt-audiotap：--apps / --list 输出 JSON 数组', { skip }, () => {
   for (const arg of ['--apps', '--list']) {
     const r = run('mt-audiotap', [arg])
     assert.equal(r.code, 0)
@@ -172,7 +122,6 @@ test('mt-audiotap：--apps / --list 输出 JSON 数组；参数错误退出码 2
     assert.ok(Array.isArray(list))
     for (const a of list) assert.match(a.bundleId, /^[^A-Z]+$/) // 小写 exe 文件名
   }
-  assert.equal(run('mt-audiotap', ['--bogus']).code, 2)
 })
 
 test('mt-audiotap：截取不存在的应用——就绪后按真实时间输出 16kHz 静音', { skip, timeout: 20_000 }, async () => {

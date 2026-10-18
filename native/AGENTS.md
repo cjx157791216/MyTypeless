@@ -9,12 +9,12 @@
 | `text-helper.swift` → `bin/mt-text` | 繁简转换（系统 ICU） |
 | `bin/mt-whisper` | 内置识别引擎：whisper.cpp 的 whisper-server，由 `scripts/build-whisper.sh` 从源码静态编译（不是本目录的 Swift 源码）；Windows 版由 `scripts/build-whisper-win.cjs` 编译成 `mt-whisper.exe`（只用 CPU） |
 | `diarize-helper.c` → `bin/mt-diarize` | 会议声纹（D-015）：常驻，按行读命令，从会议临时录音取一段算声音特征；静态链接 sherpa-onnx / ONNX Runtime，由 `scripts/build-diarize.sh` 编译；Windows 用同一份源码（`_WIN32` 分支），由 `npm run diarize:win` 编译成 `mt-diarize.exe` |
-| `focus-helper.swift` → `bin/mt-focus` | 前台应用信息（bundleId、名称、pid），以及按 pid 激活应用 |
+| `focus-helper.swift` → `bin/mt-focus` | 前台应用信息（bundleId、名称、pid）、按 pid 激活应用、读焦点输入框的选中文字（`--selected-text`）与光标前后一段（`--caret-context`） |
 | `audiotap-helper.swift` → `bin/mt-audiotap` | 线上会议截取会议软件播放的声音（Core Audio process tap，macOS 14.2+，D-033）：stdout 连续输出 16kHz 单声道 s16le；`--apps` 列应用、`--probe` 开会前完成授权 |
 | `win/` → `bin/mt-*.exe` | Windows 版助手（C++ + Win32，GAP-008）：`text-helper.cpp`、`focus-helper.cpp`、`inject-helper.cpp`、`hotkey-helper.cpp`、`audiotap-helper.cpp`，共用 `process-info.h`（exe 路径与文件描述、父进程退出即退出）与 `common.h`（UTF-8 转换、二进制 stdin/stdout、base64、JSON 转义）；`CMakeLists.txt` 由 `npm run native:win` 调用 |
 | `bin/` | 编译产物（gitignore），打包时经 `extraResources` 放到 `Resources/bin/` |
 
-参数、输出和退出码以 [原生助手契约](../docs/contracts/native-helpers.md) 为准，改协议时先改契约，再同步 `src/main/native.ts`。
+参数、输出和退出码以 [原生助手契约](../docs/contracts/native-helpers.md) 为准。改协议时先改契约，再在**同一个 PR** 里同步 Swift 与 `win/` 两份实现、`src/main/native.ts` 和 `test/native-helpers.test.ts`（两个平台跑同一组用例）；只有 Mac 时 C++ 部分靠 CI 的 `check-windows` 编译与测试。
 
 ## 可复制范例
 
@@ -28,7 +28,7 @@
 - 事件回调里必须处理 `tapDisabledByTimeout` / `tapDisabledByUserInput` 并重新启用 tap。
 - 合成键盘事件要显式设置 `flags`（用户可能还按着 Option/Cmd）。
 - 单修饰键触发不吞 `flagsChanged`，避免修饰键状态卡死。
-- 无辅助功能权限一律 `exit(3)`；`mt-hotkey` 在父进程退出后自行退出。
+- 参数先校验（错误一律 `exit(2)`、不发任何按键），再检查权限：无辅助功能权限一律 `exit(3)`；`mt-hotkey` 在父进程退出后自行退出。
 - `mt-audiotap` 的 IOProc 必须直接在音频线程调用（不给 dispatch queue，否则会跳过 IO 周期、声音变短）；音频线程只下混写入预分配缓冲；重采样按聚集设备的实际采样率（tap 报的格式不准，扬声器常是 44.1kHz）。
 - Windows 剪贴板：备份不了（被别的程序占着）就不能动剪贴板，否则事后“恢复”等于清空用户原来的内容；`SnapshotClipboard` 区分“备份失败”与“原本为空”。
 - Windows 版与 macOS 版协议完全一致（同名、带 `.exe`）；stdin/stdout 用二进制模式（换行不被转成 CRLF），文本一律 UTF-8；静态链接运行库，不依赖 VC++ 运行库。
@@ -40,7 +40,7 @@
 
 ## 测试
 
-`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。Windows：`npm run native:win` 后 `npm run test` 会运行 `test/native-win.test.ts`（协议与退出码）。快捷键与写入需要辅助功能权限，只能真机验证。
+`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。两个平台共同的协议与退出码在 `test/native-helpers.test.ts`（`npm run test`，助手未编译时跳过；只测不发按键、不读输入框的路径）；Windows 独有的部分（`mt-hotkey --replay`、`mt-whisper`、`mt-audiotap` 输出）在 `test/native-win.test.ts`，需先 `npm run native:win`。快捷键与写入需要辅助功能权限，只能真机验证。
 
 ## 必读
 

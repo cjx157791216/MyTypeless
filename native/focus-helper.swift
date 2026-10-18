@@ -6,14 +6,25 @@
 //       mt-focus --caret-context <前> <后> → 光标前后各若干字符的文字（追踪修改 D-012、风格学习 D-041、润色上下文 D-040）：
 //                                         {"text":"…","caret":<光标在 text 中的位置>,"pid":<前台应用 pid>}；
 //                                         只输出这一段，输入框其余内容不离开本助手；密码框、不支持时退出码 5
-// 权限: 前两个用法无需辅助功能；--selected-text 需要。
+// 权限: 前两个用法无需辅助功能；后两个需要。参数先校验（错误退出码 2，与 Windows 版一致），再检查权限（3）。
 
 import AppKit
 import ApplicationServices
 import Foundation
 
 let args = Array(CommandLine.arguments.dropFirst())
-if args.count == 2, args[0] == "--activate" {
+var caretSpan: (before: Int, after: Int)? = nil
+switch args.first {
+case nil, "--activate", "--selected-text": break
+case "--caret-context":
+    guard args.count == 3, let b = Int(args[1]), let a = Int(args[2]), b >= 0, a >= 0, b + a > 0 else { exit(2) }
+    caretSpan = (b, a)
+default:
+    FileHandle.standardError.write("usage: mt-focus [--activate <pid> | --selected-text | --caret-context <before> <after>]\n".data(using: .utf8)!)
+    exit(2)
+}
+if args.first == "--activate" {
+    guard args.count == 2 else { exit(2) }
     guard let pid = pid_t(args[1]), let app = NSRunningApplication(processIdentifier: pid) else { exit(2) }
     exit(app.activate(options: []) ? 0 : 4)
 }
@@ -44,7 +55,8 @@ func focusedElement() -> AXUIElement? {
     return field
 }
 
-if args.count == 1, args[0] == "--selected-text" {
+if args.first == "--selected-text" {
+    guard args.count == 1 else { exit(2) }
     guard AXIsProcessTrusted() else { exit(3) }
     guard let field = focusedElement() else { exit(5) }
     var selected: CFTypeRef?
@@ -62,7 +74,7 @@ func isSecureField(_ field: AXUIElement) -> Bool {
     return false
 }
 
-if args.count == 3, args[0] == "--caret-context", let before = Int(args[1]), let after = Int(args[2]) {
+if let (before, after) = caretSpan {
     guard AXIsProcessTrusted() else { exit(3) }
     guard let field = focusedElement(), !isSecureField(field) else { exit(5) }
     var rangeRef: CFTypeRef?
@@ -74,8 +86,8 @@ if args.count == 3, args[0] == "--caret-context", let before = Int(args[1]), let
     var countRef: CFTypeRef?
     var total = Int.max
     if AXUIElementCopyAttributeValue(field, kAXNumberOfCharactersAttribute as CFString, &countRef) == .success, let n = countRef as? Int { total = n }
-    let start = max(0, caret - max(0, before))
-    let end = min(total, caret + max(0, after))
+    let start = max(0, caret - before)
+    let end = min(total, caret + after)
     guard end > start else { exit(5) }
     var text: String? = nil
     // 优先按范围读取（不读整个输入框）

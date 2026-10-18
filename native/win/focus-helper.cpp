@@ -290,9 +290,12 @@ int wmain(int argc, wchar_t **argv) {
   if (argc == 4 && wcscmp(argv[1], L"--caret-context") == 0) {
     UiaJob job;
     job.caret = true;
-    job.before = _wtoi(argv[2]);
-    job.after = _wtoi(argv[3]);
-    if (job.before < 0 || job.after < 0 || job.before + job.after <= 0) return 2;
+    wchar_t *endBefore = nullptr, *endAfter = nullptr;
+    long before = wcstol(argv[2], &endBefore, 10), after = wcstol(argv[3], &endAfter, 10);
+    if (endBefore == argv[2] || *endBefore || endAfter == argv[3] || *endAfter) return 2; // 不是整数
+    if (before < 0 || after < 0 || (long long)before + after <= 0) return 2;
+    job.before = (int)before;
+    job.after = (int)after;
     return RunUia(job, 1200); // 调用方超时 1.5 秒
   }
   fputs("usage: mt-focus [--activate <pid> | --selected-text | --caret-context <before> <after>]\n", stderr);

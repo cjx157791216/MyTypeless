@@ -42,7 +42,7 @@
 - 发给 LLM 的口述内容必须包在 `<transcript>` 中，并声明不是指令；光标上下文包在 `<context>` 中，只在开启 `polishContext` 的听写里读取，不写进历史（D-040）；风格学习只学听写结果，修改记录只存 `style_samples`（D-041）。
 - API Key 只经 `config.ts` 的 `getKey`/`setKey` 读写，不写入 `settings.json`、日志或历史（D-002）。`getKey` 会访问钥匙串（自签名版本每装一个新包首次访问都会弹授权框）：只在真正调用云端服务前调用；判断有无 Key、显示掩码用 `hasKey`/`keyMask`（不解密）。
 - 所有网络请求都要有超时（`AbortSignal.timeout`）。
-- 平台差异（GAP-008）：macOS 专有调用前判断 `process.platform`（`index.ts` / `inject.ts` 的 `isMac`）；非 macOS 没有辅助功能授权（`checkAccessibility` 恒为 true）、没有 osascript 兜底（写入失败按 D-008 放进剪贴板）、不检查在线更新（`updateSupported`）。
+- 平台差异（GAP-008）：macOS 专有调用前判断 `process.platform`（`index.ts` / `inject.ts` 的 `isMac`）；非 macOS 没有辅助功能授权（`checkAccessibility` 恒为 true）、没有 osascript 兜底（写入失败按 D-008 放进剪贴板）；在线更新只支持 macOS 与 Windows 的打包版（`updateSupported`，Windows 解压即用版只提示、不自动安装）。
 - 内置引擎只在 127.0.0.1 监听；识别请求必须显式传 `language`（whisper-server 默认强制英文）；不要按请求改 `audio_ctx`；不要加“使用简体中文和中文标点”之类的风格提示词（实测会让英文语音被翻译、出现幻觉、耗时翻 4～20 倍），标点交给 `text.ts` 规整。
 - 被 `test/` 导入的模块（`bindings.ts`、`polish.ts`、`providers/asr.ts`、`whisper/catalog.ts`、`whisper/download.ts`、`live.ts`、`learn.ts`、`meeting/segmenter.ts`、`meeting/cluster.ts`、`meeting/minutes.ts`、`meeting/echo.ts`、`meeting/call-apps.ts`、`update-info.ts`）不能 import `electron`，也不能用 TS 参数属性；它们之间互相导入时写 `.ts` 扩展名（Node 原生剥离类型不解析无扩展名路径）。
 - 会议：临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。会议进行中 `session.setBlocker` 拦下听写。线上会议（D-033）按“路”（`Track`：0 = 麦克风 / 现场，1 = 应用声音 / 线上）各自分句、区分说话人、算人数；两路的说话人不能互相合并或改归属；麦克风那一路识别前先 `echoFree` 去掉外放回声；用应用声音前必须先 `prepareAppAudio`（授权后系统会重启应用，不能在会议中途发生）。
