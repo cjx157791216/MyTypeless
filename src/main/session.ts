@@ -45,7 +45,7 @@ export class DictationSessionManager {
   private liveText = ''
   private showLiveText = false // 本次录音是否在胶囊上显示识别中的文字（D-023）
   private front: Promise<FrontAppInfo> = Promise.resolve({})
-  /** 光标前已有的文字（D-039，开启时在开口同时读取，只用于本次润色，不保存） */
+  /** 光标前已有的文字（D-040，开启时在开口同时读取，只用于本次润色，不保存） */
   private caretContext: Promise<string | null> = Promise.resolve(null)
   private startedAt = 0
   private pcmChunks: Int16Array[] = []
@@ -114,7 +114,7 @@ export class DictationSessionManager {
     }
     // 前台应用在开口时就确定（后续用户切走窗口也不影响风格判断与历史归属）
     this.front = getFrontApp()
-    // 光标上下文（D-039）：只在开启后的听写里读光标前最多 300 字，与录音并行
+    // 光标上下文（D-040）：只在开启后的听写里读光标前最多 300 字，与录音并行
     this.caretContext =
       mode === 'dictation' && startSettings.polishContext && startSettings.polishEnabled
         ? getCaretContext(CONTEXT_MAX_CHARS, 0).then((c) => (c ? c.text.slice(0, c.caret) : null))
@@ -401,7 +401,7 @@ export class DictationSessionManager {
     }
   }
 
-  /** 自动词典（D-012）：常用专有名词计数；写入后追踪修改；风格学习（D-040）共用同一次追踪 */
+  /** 自动词典（D-012）：常用专有名词计数；写入后追踪修改；风格学习（D-041）共用同一次追踪 */
   private learn(finalText: string, front: FrontAppInfo, settings: ReturnType<typeof loadSettings>, mode: FeatureMode): void {
     const notify = (terms: string[]) => this.broadcast(IPC.dictChanged, terms)
     try {

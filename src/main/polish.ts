@@ -121,20 +121,20 @@ const POLISH_SYSTEM_FIXED = [
   ...POLISH_EXAMPLES.map(([raw, out]) => `原文：${raw}\n整理：\n${out}\n`)
 ].join('\n')
 
-/** 个性化（D-039、D-040）的长度上限：光标上下文按读取量截取；风格说明与每条修改记录过长时截断/跳过 */
+/** 个性化（D-040、D-041）的长度上限：光标上下文按读取量截取；风格说明与每条修改记录过长时截断/跳过 */
 export const CONTEXT_MAX_CHARS = 300
 export const STYLE_NOTE_MAX_CHARS = 500
 export const STYLE_SAMPLE_MAX_CHARS = 200
 export const STYLE_SAMPLES_IN_PROMPT = 5
 
-/** 以往对听写结果的修改（风格学习，D-040）：写入的结果 → 用户改后的样子 */
+/** 以往对听写结果的修改（风格学习，D-041）：写入的结果 → 用户改后的样子 */
 export interface StyleExample {
   before: string
   after: string
 }
 
 export interface PolishPersonalization {
-  /** 光标前已有的文字（D-039，只作参考） */
+  /** 光标前已有的文字（D-040，只作参考） */
   context?: string
   /** 用户手写的个人风格说明 */
   styleNote?: string

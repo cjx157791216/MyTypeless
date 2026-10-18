@@ -8,7 +8,7 @@ import type { HistoryRecord, HistoryStats, StyleSample } from '../shared/types'
  * M2 历史与词典存储：better-sqlite3（原创 schema）
  * - history: 听写记录
  * - dict_words: 个人词典（manual 手动 / auto 自动学习）
- * - style_samples: 风格学习的修改记录（D-040）
+ * - style_samples: 风格学习的修改记录（D-041）
  * - meta: 迁移标记等
  * 首次运行自动迁移 M1 的 history.jsonl。
  */
@@ -107,7 +107,7 @@ function open(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_meeting_segments ON meeting_segments(meeting_id, start_sample);
 
-    -- 风格学习（D-040）：写入的结果 → 用户改后的样子；只在本机，最多 STYLE_SAMPLES_MAX 条，可查看、删除
+    -- 风格学习（D-041）：写入的结果 → 用户改后的样子；只在本机，最多 STYLE_SAMPLES_MAX 条，可查看、删除
     CREATE TABLE IF NOT EXISTS style_samples (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at INTEGER NOT NULL,
@@ -314,7 +314,7 @@ export function historyStats(): HistoryStats {
   return { count: all.count, totalDurationMs: all.dur, totalChars: all.chars, weekCount: week.n, todayChars: today.c }
 }
 
-// —— 风格学习（D-040）——
+// —— 风格学习（D-041）——
 
 export const STYLE_SAMPLES_MAX = 50
 

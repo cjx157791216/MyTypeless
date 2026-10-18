@@ -86,7 +86,7 @@ test('buildPolishPrompt: 包含示例，问句示例原样整理而不回答', (
   assert.match(buildPolishPrompt('x', { outputLanguage: 'English' }).system, /- 输出语言必须是：English。/)
 })
 
-test('buildPolishPrompt 个性化（D-039、D-040）：放在最后，固定部分不变；上下文只取光标前 300 字并声明不是指令', () => {
+test('buildPolishPrompt 个性化（D-040、D-041）：放在最后，固定部分不变；上下文只取光标前 300 字并声明不是指令', () => {
   const plain = buildPolishPrompt('x', {}).system
   const fixed = plain.slice(0, plain.indexOf('本次整理：'))
   const { system, user } = buildPolishPrompt('明天见', {

@@ -92,9 +92,9 @@ export interface Settings {
   showLiveText: boolean // 说话时在胶囊上方显示识别中的文字；默认关（说话时只显示波形，松手后出结果；停顿时仍在后台识别以缩短等待，D-023）
   learnFromEdits: boolean // 写入后追踪修改、学习改正的词（只读刚插入的那段，D-012）
   learnFrequentTerms: boolean // 统计常用英文专有名词并加入词典（D-012）
-  polishContext: boolean // 润色时参考光标前已有的文字（最多 300 字，随润色请求发给所配置的 LLM，D-039）；默认关
-  learnStyle: boolean // 风格学习：保存写入后被改过的结果，润色时作为示例（D-040）；默认关
-  styleNote: string // 个人风格说明：用户手写的润色要求（D-040）
+  polishContext: boolean // 润色时参考光标前已有的文字（最多 300 字，随润色请求发给所配置的 LLM，D-040）；默认关
+  learnStyle: boolean // 风格学习：保存写入后被改过的结果，润色时作为示例（D-041）；默认关
+  styleNote: string // 个人风格说明：用户手写的润色要求（D-041）
   appMode: AppMode // 主窗口当前模式：个人（听写）/ 会议（D-015、D-017）
   meetingSpeakers: number // 上次开会选的参会人数（托盘开会也用它；D-021）；麦克风 + 应用声音时为现场人数
   meetingSource: MeetingSource // 上次开会选的声音来源（D-033）
@@ -208,7 +208,7 @@ export interface MeetingStartOptions {
   expectedRemote?: number | null // 线上（应用声音）人数
 }
 
-/** 风格学习的一条修改记录（D-040）：写入的结果 → 用户改后的样子 */
+/** 风格学习的一条修改记录（D-041）：写入的结果 → 用户改后的样子 */
 export interface StyleSample {
   id: number
   createdAt: number

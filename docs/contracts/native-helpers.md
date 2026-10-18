@@ -84,7 +84,7 @@ whisper.cpp（MIT）`whisper-server` 的静态编译版，由 `scripts/build-whi
 | --- | --- |
 | `mt-focus` | stdout：`{"bundleId","name","pid"}`，取不到时为 `{}` |
 | `mt-focus --activate <pid>` | 把该进程的应用切到前台；进程不存在退出码 2 |
-| `mt-focus --caret-context <前> <后>` | 光标前后各若干字符：`{"text","caret","pid"}`；优先按范围读取（`AXStringForRange`），不支持时读出后只截这一段输出；读不到退出码 5；密码框（`AXSecureTextField`）退出码 5；需要辅助功能权限（D-012 追踪修改、D-039 润色上下文、D-040 风格学习） |
+| `mt-focus --caret-context <前> <后>` | 光标前后各若干字符：`{"text","caret","pid"}`；优先按范围读取（`AXStringForRange`），不支持时读出后只截这一段输出；读不到退出码 5；密码框（`AXSecureTextField`）退出码 5；需要辅助功能权限（D-012 追踪修改、D-040 润色上下文、D-041 风格学习） |
 | `mt-focus --selected-text` | 焦点元素的 `AXSelectedText`（base64）；没有选中或应用不支持时退出码 5；需要辅助功能权限（否则退出码 3）；单次辅助功能调用超时 0.3 秒 |
 
 两个读文字的用法找焦点元素时先问系统焦点；问不到（Electron / Chromium 应用默认不公开辅助功能树，返回 -25204）时改问前台应用自己的焦点元素，仍问不到则对该应用设置 `AXManualAccessibility = true`（Electron 提供的开关，让它建立辅助功能树）后再问一次。读到的仍只是光标附近这一段 / 选中的文字。

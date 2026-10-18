@@ -39,7 +39,7 @@ test('learnableFromCorrection：英文改一次即收录；中文需累计；过
   assert.equal(learnableFromCorrection({ from: 'a', to: 'this is a whole new sentence written here' }), null)
 })
 
-test('editedSpan（风格学习，D-040）：找出写入那一段被改成的样子，排除前后无关文字', () => {
+test('editedSpan（风格学习，D-041）：找出写入那一段被改成的样子，排除前后无关文字', () => {
   const at = (s: string, mark = s.length) => mark
   assert.equal(editedSpan('这个方案还可以。', 'XX这个方案挺好的。YY', at('XX这个方案挺好的。')), '这个方案挺好的。')
   assert.equal(editedSpan('我们明天开会。', '前面的内容。我们明天开会', at('前面的内容。我们明天开会')), '我们明天开会')

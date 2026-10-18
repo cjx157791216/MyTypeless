@@ -393,7 +393,7 @@ for (const el of document.querySelectorAll<HTMLInputElement>('input[data-autosav
   })
 }
 
-// —— 润色个性化（D-039、D-040）：默认关闭；打开时说明会读取 / 保存什么、发给谁 ——
+// —— 润色个性化（D-040、D-041）：默认关闭；打开时说明会读取 / 保存什么、发给谁 ——
 function llmHost(): string {
   const url = ($('llm-base-url') as HTMLInputElement).value.trim() || savedSettings?.llm.baseUrl || ''
   try {

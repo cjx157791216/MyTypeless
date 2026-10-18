@@ -494,7 +494,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<Settings>) => {
     const prev = loadSettings()
     const next = saveSettings(patch)
-    // 关闭“从修改中学习”或风格学习：立即停止进行中的追踪（D-012、D-040）
+    // 关闭“从修改中学习”或风格学习：立即停止进行中的追踪（D-012、D-041）
     if ((prev.learnFromEdits && !next.learnFromEdits) || (prev.learnStyle && !next.learnStyle)) stopTracking()
     // 不再使用内置引擎，或换了模型：释放当前引擎（下次开口按新设置启动）
     const running = whisperEngine.runningModel()

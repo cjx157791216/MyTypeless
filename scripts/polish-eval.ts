@@ -15,7 +15,7 @@ export interface EvalCase {
   ideal: string
   category?: string
   words?: string[]
-  /** 个性化（D-039、D-040）：只有新提示词支持 */
+  /** 个性化（D-040、D-041）：只有新提示词支持 */
   context?: string
   styleNote?: string
   samples?: Array<{ before: string; after: string }>

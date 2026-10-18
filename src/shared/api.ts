@@ -109,7 +109,7 @@ export interface MyTypelessBridge {
     /** 声纹模型：下载 / 取消 / 删除；状态经 meeting.onLive 的 speakerModel 推送 */
     model(action: 'download' | 'cancel' | 'remove'): Promise<{ ok: boolean; error?: string }>
   }
-  /** 风格学习的修改记录（D-040） */
+  /** 风格学习的修改记录（D-041） */
   styleSamples: {
     list(): Promise<StyleSample[]>
     remove(id: number): Promise<StyleSample[]>

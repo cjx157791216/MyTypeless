@@ -163,7 +163,7 @@ export function learnableFromCorrection(c: Correction): LearnCandidate | null {
 const APPEND_MAX = 8
 
 /**
- * 风格学习（D-040）：在光标附近读到的文字里找出写入的那一段被用户改成了什么样。
+ * 风格学习（D-041）：在光标附近读到的文字里找出写入的那一段被用户改成了什么样。
  * 半全局对齐（写入内容整体对齐到读到文字中的一段，两端的无关上下文不计代价），取编辑距离最小、最靠后的一段；
  * 改动超过写入内容的一半（整段重写 / 光标已离开）或没有改动时返回 null。caret 为光标在 current 中的 UTF-16 位置。
  */

@@ -15,4 +15,4 @@
 | B-006 | 2026-10-15 | [D-011](decisions/domains/pipeline.md) |
 | B-001 | 2026-10-15 | [D-012](decisions/domains/general.md) |
 | B-007 | 2026-10-17 | [D-033](decisions/domains/meeting.md) |
-| B-002 | 2026-10-18 | [D-039](decisions/domains/general.md) |
+| B-002 | 2026-10-18 | [D-040](decisions/domains/general.md) |
