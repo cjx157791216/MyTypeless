@@ -3,6 +3,7 @@ import { execFile, spawn, type ChildProcess } from 'child_process'
 import { createInterface } from 'readline'
 import type { AudioApp } from '../../shared/types'
 import { helperPath } from '../native'
+import { classifyAudioApps } from './call-apps'
 
 /**
  * 线上会议的应用声音（D-033）：mt-audiotap 截取会议软件播放出来的对方声音，stdout 连续输出 16kHz 单声道 s16le。
@@ -37,37 +38,10 @@ function ownAppId(): string {
   return app.isPackaged ? 'com.mytypeless' : 'com.github.Electron'
 }
 
-/** 常见会议软件（选择列表排在前面；开会时默认选正在运行的第一个） */
-const MEETING_APPS = [
-  'com.tencent.meeting', // 腾讯会议
-  'com.electron.lark', // 飞书
-  'us.zoom.xos', // Zoom
-  'com.microsoft.teams2',
-  'com.microsoft.teams',
-  'com.alibaba.DingTalkMac', // 钉钉
-  'com.tencent.xinWeChat', // 微信
-  'com.cisco.webexmeetingsapp',
-  'com.google.Chrome', // 网页会议（Google Meet、腾讯会议网页版…）
-  'com.microsoft.edgemac',
-  'com.apple.Safari',
-  'org.mozilla.firefox',
-  // Windows：小写 exe 文件名（mt-audiotap --apps 的 bundleId）
-  'wemeetapp.exe', // 腾讯会议
-  'feishu.exe', // 飞书
-  'lark.exe',
-  'zoom.exe',
-  'ms-teams.exe',
-  'teams.exe',
-  'dingtalk.exe', // 钉钉
-  'weixin.exe', // 微信
-  'wechat.exe',
-  'webexhost.exe',
-  'chrome.exe',
-  'msedge.exe',
-  'firefox.exe'
-]
-
-/** 正在运行的应用（给开会时选择“截取哪个应用的声音”）：常见会议软件在前，其次是正在发声的 */
+/**
+ * 正在运行的应用（给开会时选择“截取哪个应用的声音”）：通话软件在前、浏览器其次，其他应用最后
+ * （界面把其他应用收在「其他应用…」里；分类见 call-apps.ts）
+ */
 export function listAudioApps(): Promise<AudioApp[]> {
   const bin = helperPath('mt-audiotap')
   if (!bin || !appAudioSupported()) return Promise.resolve([])
@@ -75,13 +49,7 @@ export function listAudioApps(): Promise<AudioApp[]> {
     execFile(bin, ['--apps'], { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve([])
       try {
-        const own = ownAppId()
-        const list = (JSON.parse(stdout) as AudioApp[]).filter((a) => !a.bundleId.startsWith(own))
-        const rank = (a: AudioApp) => {
-          const i = MEETING_APPS.indexOf(a.bundleId)
-          return i >= 0 ? i : MEETING_APPS.length + (a.output ? 0 : a.audio ? 1 : 2)
-        }
-        resolve(list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)))
+        resolve(classifyAudioApps(JSON.parse(stdout) as Omit<AudioApp, 'kind'>[], ownAppId()))
       } catch {
         resolve([])
       }
@@ -127,10 +95,6 @@ export async function prepareAppAudio(timeoutMs = 2500): Promise<'ready' | 'wait
   }
   const r = await Promise.race([probing, new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))])
   return r ? 'ready' : 'waiting'
-}
-
-export function isMeetingApp(bundleId: string): boolean {
-  return MEETING_APPS.includes(bundleId)
 }
 
 export type AppAudioEvent =

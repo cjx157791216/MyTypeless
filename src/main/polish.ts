@@ -282,6 +282,43 @@ export class LlmPolisher {
     }
   }
 
+  /**
+   * 连通性测试（设置页「测试连接」）：发一个极短的请求，流式收到第一段输出（思考过程也算）就算连通，
+   * 不等模型写完；返回到第一段输出的毫秒数。整体超时 timeoutMs。
+   */
+  async ping(): Promise<number> {
+    const started = Date.now()
+    const signal = AbortSignal.timeout(this.timeoutMs)
+    const res = await this.request('你在做连通性测试。', '请只回复：OK', 0, signal, true)
+    if (!(res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      const body = await res.text()
+      let ok = false
+      try {
+        ok = Array.isArray((JSON.parse(body) as { choices?: unknown }).choices)
+      } catch {
+        /* 不是 JSON */
+      }
+      if (!ok) throw new Error(`LLM_NOT_COMPATIBLE: ${body.slice(0, 300)}`)
+      return Date.now() - started
+    }
+    const parser = createSseParser()
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    try {
+      while (!parser.seen()) {
+        const { done, value } = await reader.read()
+        if (done) break
+        parser.push(decoder.decode(value, { stream: true }))
+        const err = parser.error()
+        if (err) throw new Error(`LLM_STREAM_ERROR: ${err}`)
+      }
+    } finally {
+      reader.cancel().catch(() => {})
+    }
+    if (!parser.seen()) throw new Error('LLM_NOT_COMPATIBLE: 流式响应里没有 OpenAI 格式的内容')
+    return Date.now() - started
+  }
+
   private async chat(system: string, user: string, temperature = 0.2): Promise<string> {
     return readCompletion(await this.request(system, user, temperature, AbortSignal.timeout(this.timeoutMs), false))
   }
@@ -341,10 +378,12 @@ async function readCompletion(res: Response): Promise<string> {
  * OpenAI 兼容流式响应（SSE）解析：按行拼接被切开的事件，只累加 delta.content；
  * 思考过程（reasoning_content）、注释行（: keep-alive）只算“有输出”，不进正文。
  */
-export function createSseParser(): { push(chunk: string): void; text(): string; done(): boolean } {
+export function createSseParser(): { push(chunk: string): void; text(): string; done(): boolean; seen(): boolean; error(): string | null } {
   let buf = ''
   let out = ''
   let finished = false
+  let seen = false
+  let error: string | null = null
   return {
     push(chunk) {
       buf += chunk
@@ -360,6 +399,8 @@ export function createSseParser(): { push(chunk: string): void; text(): string; 
         }
         try {
           const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string | null } }> }
+          if (Array.isArray(json.choices)) seen = true
+          else error ??= serverMessage(data) || data.slice(0, 300)
           out += json.choices?.[0]?.delta?.content ?? ''
         } catch {
           /* 不是 JSON 的行忽略 */
@@ -367,8 +408,57 @@ export function createSseParser(): { push(chunk: string): void; text(): string; 
       }
     },
     text: () => out,
-    done: () => finished
+    done: () => finished,
+    /** 收到过 OpenAI 格式（带 choices）的事件 */
+    seen: () => seen,
+    /** 流里第一条不是 OpenAI 格式的事件（多为服务端报错） */
+    error: () => error
   }
+}
+
+/** 从服务端返回的错误内容里取出原话（OpenAI 的 error.message，或 message / msg） */
+function serverMessage(body: string): string {
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string; msg?: string }
+    const m = typeof j.error === 'string' ? j.error : j.error?.message ?? j.message ?? j.msg
+    if (m) return String(m).slice(0, 200)
+  } catch {
+    /* 不是 JSON */
+  }
+  return body.trim().slice(0, 200)
+}
+
+/**
+ * 把调用 LLM 的错误翻译成给用户看的原因（设置页「测试连接」用），带上服务端原话。
+ */
+export function describeLlmError(err: unknown): string {
+  const e = err instanceof Error ? err : new Error(String(err))
+  const cause = (e as Error & { cause?: { code?: string; message?: string } }).cause
+  const http = e.message.match(/^LLM_HTTP_(\d+): ?([\s\S]*)$/)
+  if (http) {
+    const status = Number(http[1])
+    const said = serverMessage(http[2])
+    const tail = said ? `：${said}` : ''
+    if (status === 401 || status === 403) return `API Key 无效或没有权限（HTTP ${status}）${tail}`
+    if (status === 404) return `地址或模型不存在（HTTP 404），请检查 Base URL 是否完整（如 …/v1、…/api/paas/v4）和模型名${tail}`
+    if (status === 400) return `请求被拒绝（HTTP 400），常见原因是模型名不对${tail}`
+    if (status === 429) return `请求太频繁或额度不足（HTTP 429）${tail}`
+    if (status >= 500) return `服务端出错（HTTP ${status}），可稍后重试${tail}`
+    return `请求失败（HTTP ${status}）${tail}`
+  }
+  if (e.message === 'LLM_API_KEY_MISSING') return '未填写 API Key'
+  const compat = e.message.match(/^LLM_NOT_COMPATIBLE: ?([\s\S]*)$/)
+  if (compat) return `返回内容不是 OpenAI 兼容格式，请检查 Base URL 是否填对（应为 OpenAI 兼容接口地址）：${serverMessage(compat[1])}`
+  const stream = e.message.match(/^LLM_STREAM_ERROR: ?([\s\S]*)$/)
+  if (stream) return `服务端报错：${stream[1]}`
+  if (e.name === 'TimeoutError' || e.name === 'AbortError') return '连接超时：服务没有响应，请检查 Base URL 和网络'
+  const code = cause?.code ?? ''
+  if (code === 'ERR_INVALID_URL' || /Invalid URL|Failed to parse URL/i.test(e.message + (cause?.message ?? ''))) return 'Base URL 格式不对：应以 http:// 或 https:// 开头'
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return '找不到服务器：请检查 Base URL 的域名和网络'
+  if (code === 'ECONNREFUSED') return '连接被拒绝：服务没有运行或端口不对'
+  if (code.startsWith('CERT_') || code.includes('TLS') || code === 'DEPTH_ZERO_SELF_SIGNED_CERT') return `HTTPS 证书校验失败（${code}）`
+  if (e.message === 'fetch failed' || code) return `无法连接到服务${code ? `（${code}）` : ''}：请检查 Base URL 和网络`
+  return e.message.slice(0, 200)
 }
 
 // ---------- 各模式系统提示词（全部原创措辞） ----------

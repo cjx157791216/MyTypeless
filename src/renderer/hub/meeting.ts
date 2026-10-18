@@ -71,7 +71,8 @@ async function loadList(): Promise<void> {
       sel.value = String(n || 2)
     }
     ;($('meeting-source') as HTMLSelectElement).value = s.meetingSource || 'mic'
-    await loadApps(s.meetingApp ?? '')
+    // 上次只用麦克风（没用过或没在用线上会议）：当作没有偏好，默认选第一个通话软件；否则沿用上次的选择（空 = 全部系统声音）
+    await loadApps(s.meetingSource && s.meetingSource !== 'mic' ? (s.meetingApp ?? '') : null)
   } else await loadApps(($('meeting-app') as HTMLSelectElement).value)
   updateSourceUi()
   void prepareAppAudio()
@@ -121,25 +122,66 @@ async function loadList(): Promise<void> {
   }
 }
 
-/** 可截取声音的应用：常见会议软件在前；最后是「全部系统声音」 */
-async function loadApps(selected: string): Promise<void> {
+/** 「其他应用…」选项的值（选它时展开其余正在运行的应用） */
+const OTHER_APPS = '__other_apps__'
+let audioApps: AudioApp[] = []
+let showOtherApps = false
+
+/**
+ * 可截取声音的应用（D-033）：只列正在运行的通话软件和浏览器（网页会议），然后是「全部系统声音」；
+ * 其余应用收在「其他应用…」里，选它或上次选的就是其他应用时才展开
+ */
+async function loadApps(selected: string | null): Promise<void> {
   const { supported, apps } = await api.meeting.audioApps()
   appsSupported = supported
-  const sel = $('meeting-app') as HTMLSelectElement
-  sel.innerHTML = ''
-  for (const a of apps) sel.add(appOption(a))
-  sel.add(new Option('全部系统声音', ''))
-  sel.value = apps.some((a) => a.bundleId === selected) || selected === '' ? selected : (apps[0]?.bundleId ?? '')
+  audioApps = apps
+  if (apps.some((a) => a.kind === 'other' && a.bundleId === selected)) showOtherApps = true
+  renderApps(selected)
   const source = $('meeting-source') as HTMLSelectElement
   for (const o of Array.from(source.options)) if (o.value !== 'mic') o.disabled = !supported
   if (!supported) source.value = 'mic'
 }
 
+/** selected 为 null：没有偏好，选第一个通话软件 / 浏览器 */
+function renderApps(selected: string | null): void {
+  const sel = $('meeting-app') as HTMLSelectElement
+  sel.innerHTML = ''
+  const main = audioApps.filter((a) => a.kind !== 'other')
+  const others = audioApps.filter((a) => a.kind === 'other')
+  for (const a of main) sel.add(appOption(a))
+  sel.add(new Option('全部系统声音', ''))
+  if (others.length && showOtherApps) {
+    const group = document.createElement('optgroup')
+    group.label = '其他应用'
+    for (const a of others) group.appendChild(appOption(a))
+    sel.appendChild(group)
+  } else if (others.length) sel.add(new Option('其他应用…', OTHER_APPS))
+  const pickable = showOtherApps ? audioApps : main
+  // 默认：第一个通话软件 / 浏览器；都没开着时为全部系统声音
+  sel.value = selected !== null && (selected === '' || pickable.some((a) => a.bundleId === selected)) ? selected : (main[0]?.bundleId ?? '')
+}
+
 function appOption(a: AudioApp): HTMLOptionElement {
-  const o = new Option(a.output ? `${a.name}（正在发声）` : a.name, a.bundleId)
+  const notes = [a.kind === 'browser' ? '网页会议' : '', a.output ? '正在发声' : ''].filter(Boolean)
+  const o = new Option(notes.length ? `${a.name}（${notes.join('，')}）` : a.name, a.bundleId)
   o.dataset.name = a.name
   return o
 }
+
+$('meeting-app').addEventListener('change', () => {
+  const sel = $('meeting-app') as HTMLSelectElement
+  if (sel.value !== OTHER_APPS) return
+  showOtherApps = true
+  renderApps(audioApps.find((a) => a.kind === 'other')?.bundleId ?? '')
+})
+
+// 用户去打开会议软件后回到主窗口：刷新正在运行的应用（窗口失焦时下拉框不会是展开的，重建选项不打断操作）
+window.addEventListener('focus', () => {
+  if (live.state !== 'idle' || ($('meeting-source') as HTMLSelectElement).value === 'mic') return
+  void loadApps(($('meeting-app') as HTMLSelectElement).value)
+})
+
+const APP_LIST_HINT = '列表里只有正在运行的通话软件和浏览器：没看到要用的软件就先打开它，回到这里会自动刷新。'
 
 /** 按声音来源显示应用与人数选择 */
 function updateSourceUi(): void {
@@ -158,9 +200,9 @@ function updateSourceUi(): void {
         ? '截取会议软件的声音需要 Windows 11（Windows 10 build 20348 以上），请用麦克风'
         : '当前平台暂不支持截取会议软件的声音，请用麦克风'
     : source === 'mixed'
-      ? '现场的人走麦克风，会议软件里的人走软件的声音，分开区分说话人。建议戴耳机：外放时对方的声音会被麦克风再录一遍（重复的部分会自动去掉）。' + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
+      ? '现场的人走麦克风，会议软件里的人走软件的声音，分开区分说话人。建议戴耳机：外放时对方的声音会被麦克风再录一遍（重复的部分会自动去掉）。' + APP_LIST_HINT + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
       : source === 'app'
-        ? '只转写会议软件播放出来的声音（对方的声音），你自己说的话不会被录下。' + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
+        ? '只转写会议软件播放出来的声音（对方的声音），你自己说的话不会被录下。' + APP_LIST_HINT + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
         : ''
 }
 

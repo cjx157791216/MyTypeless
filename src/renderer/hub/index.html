@@ -353,7 +353,11 @@
               <label>模型 <input id="llm-model" type="text" placeholder="deepseek-v4-flash / gpt-6-luna / …" /></label>
               <label>API Key <input id="llm-key" type="password" placeholder="留空则仅本地清理" /></label>
               <div class="hint" id="llm-key-state"></div>
-              <div class="hint">翻译、改写、提问和会议纪要也使用这里的模型。</div>
+              <div class="row-actions">
+                <button id="btn-llm-test" class="btn mini">测试连接</button>
+                <span id="llm-test-state" class="hint"></span>
+              </div>
+              <div class="hint">翻译、改写、提问和会议纪要也使用这里的模型。测试用的是上面当前填写的内容，不必先保存。</div>
             </div>
           </div>
 

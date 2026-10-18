@@ -109,6 +109,8 @@ body {
 @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
 .hint { font-size: 12px; color: var(--muted); line-height: 1.55; }
 .hint.warn { color: var(--warn); }
+.hint.ok { color: var(--ok); }
+.hint.bad { color: var(--danger); }
 .link { color: var(--accent); text-decoration: none; font-size: 12px; }
 kbd {
   background: var(--bg); border: 1px solid var(--border-strong); border-bottom-width: 2px;
