@@ -10,9 +10,13 @@ import {
   cleanLlmOutput,
   looksLikeRunaway,
   buildPolishPrompt,
-  POLISH_EXAMPLES
+  POLISH_EXAMPLES,
+  createSseParser,
+  LlmPolisher
 } from '../src/main/polish.ts'
 import { checkCase, loadCases } from '../scripts/polish-eval.ts'
+import { createServer, type ServerResponse } from 'node:http'
+import type { Settings } from '../src/shared/types.ts'
 
 test('stripFillers: 删除嗯/呃，保留实词里的“啊/额”', () => {
   assert.equal(stripFillers('嗯，我觉得这个方案可以'), '我觉得这个方案可以')
@@ -102,4 +106,74 @@ test('llmTimeoutMs：长文本润色超时随长度增加，有上限', () => {
 test('hasSpokenContent：只有语气词/标点的识别结果算没有内容（不调用 LLM）', () => {
   for (const t of ['', '。', '嗯。', '嗯，啊。', '嗯嗯', '呃……', 'um, uh.']) assert.equal(hasSpokenContent(t), false, t)
   for (const t of ['嗯，明天开会。', '那个。', '好', 'OK', '3']) assert.equal(hasSpokenContent(t), true, t)
+})
+
+test('createSseParser：按行拼接被切开的事件，只取正文、忽略思考过程，识别 [DONE]', () => {
+  const p = createSseParser()
+  const ev = (delta: object) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`
+  const all = ev({ reasoning_content: '先想一想' }) + ev({ content: '## 结论' }) + ': keep-alive\n\n' + ev({ content: '\n- 周五上线' }) + 'data: [DONE]\n\n'
+  // 任意切开（包括切在一行中间、切在多字节字符中间之外的位置）
+  for (let i = 0; i < all.length; i += 7) p.push(all.slice(i, i + 7))
+  assert.equal(p.text(), '## 结论\n- 周五上线')
+  assert.equal(p.done(), true)
+})
+
+// 本机假服务：按给定节奏输出 SSE；用来验证“只要还在输出就不超时”
+function fakeLlm(handler: (res: ServerResponse, body: Record<string, unknown>) => void): Promise<{ url: string; close: () => void }> {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', (c) => (raw += c))
+      req.on('end', () => handler(res, JSON.parse(raw)))
+    })
+    server.listen(0, '127.0.0.1', () => {
+      const port = (server.address() as { port: number }).port
+      resolve({ url: `http://127.0.0.1:${port}/v1`, close: () => server.closeAllConnections?.() ?? server.close() })
+    })
+  })
+}
+const llmFor = (baseUrl: string, idleMs: number) => new LlmPolisher({ llm: { baseUrl, model: 'm' } } as unknown as Settings, 'k', idleMs)
+const sse = (res: ServerResponse, delta: object) => res.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`)
+
+test('LlmPolisher.complete：流式接收，模型一直在输出（含思考过程）时总耗时超过超时也不放弃', async () => {
+  const srv = await fakeLlm((res, body) => {
+    assert.equal(body.stream, true)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    let n = 0
+    const t = setInterval(() => {
+      if (++n <= 8) return void sse(res, { reasoning_content: '…' })
+      clearInterval(t)
+      sse(res, { content: '纪要正文' })
+      res.end('data: [DONE]\n\n')
+    }, 40)
+  })
+  try {
+    assert.equal(await llmFor(srv.url, 150).complete('s', 'u'), '纪要正文') // 共约 360ms > 150ms
+  } finally {
+    srv.close()
+  }
+})
+
+test('LlmPolisher.complete：连续一段时间没有任何输出才算超时', async () => {
+  const srv = await fakeLlm((res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    sse(res, { content: '开头' }) // 之后不再输出
+  })
+  try {
+    await assert.rejects(llmFor(srv.url, 150).complete('s', 'u'), /没有任何输出/)
+  } finally {
+    srv.close()
+  }
+})
+
+test('LlmPolisher.complete：服务不支持流式、直接返回整段 JSON 时照常可用', async () => {
+  const srv = await fakeLlm((res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: '整段结果' } }] }))
+  })
+  try {
+    assert.equal(await llmFor(srv.url, 150).complete('s', 'u'), '整段结果')
+  } finally {
+    srv.close()
+  }
 })

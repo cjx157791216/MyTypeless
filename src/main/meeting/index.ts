@@ -941,6 +941,7 @@ export class MeetingManager {
       return { ok: false, error }
     }
     try {
+      // 流式接收：连续 3 分钟没有任何输出（含思考过程）才算超时（GLM-5.3 等强制深度思考，长转写稿要先想几分钟）
       const llm = new LlmPolisher(settings, key, 180_000)
       const speakers = detail.speakerList.map((s) => s.displayName)
       const chunks = chunkTranscript(lines)

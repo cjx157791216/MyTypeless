@@ -197,42 +197,82 @@ export class LlmPolisher {
     return looksLikeRunaway(pre, out) ? localPreClean(raw) : out
   }
 
-  /** 通用补全（会议纪要等）：调用方自备提示词，转写内容须自行用 <transcript> 包裹 */
-  complete(system: string, user: string, temperature = 0.3): Promise<string> {
-    return this.chat(system, user, temperature)
+  /**
+   * 通用补全（会议纪要等）：调用方自备提示词，转写内容须自行用 <transcript> 包裹。
+   * 流式接收：推理模型（如 GLM-5.3 强制深度思考）长输入要先思考几分钟，一次性等结果会整体超时；
+   * 这里 timeoutMs 是“连续没有任何输出（含思考过程）”的超时，另有总时长上限。
+   */
+  async complete(system: string, user: string, temperature = 0.3): Promise<string> {
+    const ctrl = new AbortController()
+    let reason: 'idle' | 'total' | null = null
+    let idle: ReturnType<typeof setTimeout> | undefined
+    const kick = () => {
+      clearTimeout(idle)
+      idle = setTimeout(() => ((reason = 'idle'), ctrl.abort()), this.timeoutMs)
+    }
+    const total = setTimeout(() => ((reason = 'total'), ctrl.abort()), COMPLETE_MAX_MS)
+    kick()
+    try {
+      const res = await this.request(system, user, temperature, ctrl.signal, true)
+      kick()
+      // 不支持流式的服务会直接返回整段 JSON
+      if (!(res.headers.get('content-type') ?? '').includes('text/event-stream')) return await readCompletion(res)
+      const parser = createSseParser()
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      while (!parser.done()) {
+        const { done, value } = await reader.read()
+        if (done) break
+        kick()
+        parser.push(decoder.decode(value, { stream: true }))
+      }
+      reader.cancel().catch(() => {})
+      const text = cleanLlmOutput(parser.text())
+      if (!text) throw new Error('LLM_EMPTY_RESPONSE')
+      return text
+    } catch (err) {
+      if (reason === 'idle') throw new Error(`模型连续 ${Math.round(this.timeoutMs / 1000)} 秒没有任何输出，已放弃（可稍后重试或换个模型）`)
+      if (reason === 'total') throw new Error(`超过 ${COMPLETE_MAX_MS / 60_000} 分钟仍未完成，已放弃（可稍后重试或换个模型）`)
+      throw err
+    } finally {
+      clearTimeout(idle)
+      clearTimeout(total)
+    }
   }
 
   private async chat(system: string, user: string, temperature = 0.2): Promise<string> {
+    return readCompletion(await this.request(system, user, temperature, AbortSignal.timeout(this.timeoutMs), false))
+  }
+
+  /** 发请求；部分推理模型不接受 temperature 时去掉后重试一次；非 2xx 抛 LLM_HTTP_<状态码> */
+  private async request(system: string, user: string, temperature: number, signal: AbortSignal, stream: boolean): Promise<Response> {
     if (!this.apiKey) throw new Error('LLM_API_KEY_MISSING')
     const url = this.settings.llm.baseUrl.replace(/\/+$/, '') + '/chat/completions'
     const body: Record<string, unknown> = {
       model: this.settings.llm.model,
       temperature,
+      ...(stream ? { stream: true } : {}),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user }
       ]
     }
-    let res = await this.post(url, body)
+    let res = await this.post(url, body, signal)
     if (res.status === 400) {
-      // 部分推理模型不接受 temperature：去掉后重试一次
       const detail = await res.clone().text().catch(() => '')
       if (/temperature/i.test(detail)) {
         delete body.temperature
-        res = await this.post(url, body)
+        res = await this.post(url, body, signal)
       }
     }
     if (!res.ok) {
       const detail = await res.text().catch(() => '')
       throw new Error(`LLM_HTTP_${res.status}: ${detail.slice(0, 300)}`)
     }
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
-    const text = cleanLlmOutput(json.choices?.[0]?.message?.content ?? '')
-    if (!text) throw new Error('LLM_EMPTY_RESPONSE')
-    return text
+    return res
   }
 
-  private post(url: string, body: Record<string, unknown>): Promise<Response> {
+  private post(url: string, body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
     return fetch(url, {
       method: 'POST',
       headers: {
@@ -240,8 +280,52 @@ export class LlmPolisher {
         Authorization: `Bearer ${this.apiKey}`
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs)
+      signal
     })
+  }
+}
+
+/** complete() 的总时长上限 */
+const COMPLETE_MAX_MS = 20 * 60_000
+
+async function readCompletion(res: Response): Promise<string> {
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
+  const text = cleanLlmOutput(json.choices?.[0]?.message?.content ?? '')
+  if (!text) throw new Error('LLM_EMPTY_RESPONSE')
+  return text
+}
+
+/**
+ * OpenAI 兼容流式响应（SSE）解析：按行拼接被切开的事件，只累加 delta.content；
+ * 思考过程（reasoning_content）、注释行（: keep-alive）只算“有输出”，不进正文。
+ */
+export function createSseParser(): { push(chunk: string): void; text(): string; done(): boolean } {
+  let buf = ''
+  let out = ''
+  let finished = false
+  return {
+    push(chunk) {
+      buf += chunk
+      let i: number
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim()
+        buf = buf.slice(i + 1)
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (data === '[DONE]') {
+          finished = true
+          continue
+        }
+        try {
+          const json = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string | null } }> }
+          out += json.choices?.[0]?.delta?.content ?? ''
+        } catch {
+          /* 不是 JSON 的行忽略 */
+        }
+      }
+    },
+    text: () => out,
+    done: () => finished
   }
 }
 
