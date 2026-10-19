@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ALIGN_TOLERANCE, DENOISE_MAX_LAG, MEETING_VAD, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, denoiseLagging, overloaded, planFeed, samplesToMs, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
 import { readFileSync } from 'node:fs'
-import { OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
+import { AUTO_SPEAKERS, OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
 import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown, generateMinutesBody, chunkNotesSystemPrompt, mergeNotesSystemPrompt } from '../src/main/meeting/minutes.ts'
 import { renderMarkdown } from '../src/shared/markdown.ts'
 import { normalizeLoudness } from '../src/main/meeting/enhance.ts'
@@ -272,20 +272,72 @@ test('声纹认人（真人短句，原声/外放/跨通道）：用整组声音
   assert.ok(checked >= 10)
 })
 
-test('声纹认人：一个声纹只给一个人；本场已用过的不再给；单句不认；声纹更新为加权平均', () => {
+test('声纹认人：一个声纹只给一个人；本场已用过的不再给；不到 3 句不认；声纹更新为加权平均', () => {
   const set = fourSpeakers
   const a = set.filter((x) => x.t === 0).map((x) => normalize(x.v))
   const print = Float32Array.from(a[0], (_, k) => (a[0][k] + a[1][k]) / 2)
   const prints = [{ id: 7, vector: print }]
   const g = (key: number, vs: Float32Array[]) => ({ key, mean: Float32Array.from(vs[0], (_, k) => vs.reduce((t, v) => t + v[k], 0) / vs.length), n: vs.length })
-  const both = identifySpeakers([g(1, [a[2], a[0]]), g(2, [a[2], a[1]])], prints)
+  const both = identifySpeakers([g(1, [a[2], a[0], a[1]]), g(2, [a[2], a[1], a[0]])], prints)
   assert.equal(both.size, 1, '同一声纹只给一个人')
-  assert.equal(identifySpeakers([g(1, [a[2], a[0]])], prints, new Set([7])).size, 0, '本场已用过')
-  assert.equal(identifySpeakers([g(1, [a[2]])], prints).size, 0, '单句不认')
+  assert.equal(identifySpeakers([g(1, [a[2], a[0], a[1]])], prints, new Set([7])).size, 0, '本场已用过')
+  assert.equal(identifySpeakers([g(1, [a[2], a[0]])], prints).size, 0, '两句不认')
   assert.ok(printScore(print, print) > 0.999)
   const blended = blendVoiceprint(print, 2, a[2], 1)
   assert.ok(Math.abs(blended[0] - (print[0] * 2 + a[2][0]) / 3) < 1e-6)
   assert.ok(cosine(a[0], a[0]) > 0.999)
+})
+
+test('自动人数（D-042，真人短句，原声与外放；1～4 人的全部组合）：人数全部判对，单人不被拆开', () => {
+  const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
+  const combos: string[][] = []
+  const pick = (start: number, cur: string[], k: number) => {
+    if (cur.length === k) return combos.push([...cur])
+    for (let i = start; i < spks.length; i++) pick(i + 1, [...cur, spks[i]], k)
+  }
+  for (const k of [1, 2, 3, 4]) pick(0, [], k)
+  let checked = 0
+  for (const ch of ['clean', 'played']) {
+    for (const combo of combos) {
+      const set = shortTurns.filter((x) => x.ch === ch && combo.includes(x.spk))
+      let next = 1000
+      const items: ClusterItem[] = set.map((x, i) => ({ id: i, speaker: 1, v: x.v, durMs: x.d * 1000, locked: false }))
+      const r = regroup(items, { expected: AUTO_SPEAKERS, create: () => next++ })
+      const labels = set.map((_, i) => r.assign.get(i)!)
+      assert.equal(new Set(labels).size, combo.length, `${ch} ${combo.join('+')}：判成 ${new Set(labels).size} 人`)
+      assert.ok(accuracy(set.map((x) => combo.indexOf(x.spk)), labels) / set.length >= 0.9, `${ch} ${combo.join('+')}：归属准确率不到 90%`)
+      checked++
+    }
+  }
+  assert.ok(checked >= 30)
+})
+
+test('整体归类：同一个命名过的人的句子不会被拆成几个人（自动与已知人数）', () => {
+  const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
+  const A = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[1])
+  const B = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[2])
+  const odd = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[0])[0] // 声音不像、但被标在 A 名下的一句
+  const set = [...A, odd, ...B]
+  const items: ClusterItem[] = set.map((x, i) => ({ id: i, speaker: i <= A.length ? 1 : 2, v: x.v, durMs: x.d * 1000, locked: false }))
+  for (const expected of [AUTO_SPEAKERS, 2]) {
+    let next = 1000
+    const r = regroup(items, { expected, named: new Set([1]), create: () => next++ })
+    assert.equal(next, 1000, `人数 ${expected}：多建了说话人`)
+    assert.equal(r.assign.get(A.length), 1, `人数 ${expected}：命名过的句子被拆走`)
+  }
+})
+
+test('自动人数：只说两句的组不单算一个人；用户命名过的说话人句子再少也保留', () => {
+  const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
+  const A = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[1])
+  const B = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[0]).slice(0, 2)
+  const set = [...A, ...B]
+  let next = 1000
+  const items: ClusterItem[] = set.map((x, i) => ({ id: i, speaker: i < A.length ? 1 : 2, v: x.v, durMs: x.d * 1000, locked: false }))
+  assert.equal(new Set(regroup(items, { expected: AUTO_SPEAKERS, create: () => next++ }).assign.values()).size, 1, '两句不单算一个人')
+  const named = regroup(items, { expected: AUTO_SPEAKERS, named: new Set([2]), create: () => next++ })
+  assert.equal(new Set(named.assign.values()).size, 2, '命名过的人保留')
+  assert.ok(set.every((x, i) => (named.assign.get(i) === named.assign.get(A.length)) === (i >= A.length)), '命名过的人的句子归属不变')
 })
 
 test('纪要：转写稿合并同一人连续发言、时间格式、长会议分段', () => {

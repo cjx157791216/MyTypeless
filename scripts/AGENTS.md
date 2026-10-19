@@ -15,7 +15,7 @@
 | `publish.cjs` / `publish-win.cjs` | 发布到 GitHub Release（`npm run release`，D-028、D-032）/ Actions 里上传 Windows 包到草稿（D-036） |
 | `gen-icon.py` / `gen-tray-icon.py` | 生成应用图标 / 托盘模板图 |
 | `gen-speaker-fixture.cjs` | 生成说话人回归数据 `test/fixtures/speakers.json`（换声纹模型后重跑，D-026） |
-| `echo-sim.ts` / `polish-eval.ts` | 外放回声门槛标定（D-033）/ 听写润色提示词评测 |
+| `echo-sim.ts` / `speaker-eval.ts` / `polish-eval.ts` | 外放回声门槛标定（D-033）/ 说话人区分与声纹认人评测（D-042）/ 听写润色提示词评测 |
 | `doc-kit/` | 文档脚本：`context.mjs` 任务路由、`check.mjs` 文档校验 |
 
 ## 不变量与陷阱

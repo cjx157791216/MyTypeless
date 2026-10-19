@@ -1,4 +1,4 @@
-import type { AudioApp, MeetingDetail, MeetingLive, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingSummary, MeetingTrack } from '../../shared/types'
+import { AUTO_SPEAKERS, type AudioApp, type MeetingDetail, type MeetingLive, type MeetingSegment, type MeetingSource, type MeetingSpeaker, type MeetingSummary, type MeetingTrack } from '../../shared/types'
 import { renderMarkdown } from '../../shared/markdown'
 import { $, api, escapeHtml, fmtClock, fmtDate, fmtDuration, fmtTime, hidePopover, showPopover, showPopoverContent, speakerColor, toast, type PopoverItem } from './util'
 
@@ -55,8 +55,14 @@ const STATUS_TEXT: Record<MeetingSummary['status'], string> = {
   interrupted: '待整理'
 }
 
-/** 参会人数选项（D-021：只按人数区分说话人，不自动判断人数） */
-const SPEAKER_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 10]
+/** 参会人数选项：自动（按声音判断，D-042）或 1～10 人 */
+const SPEAKER_COUNTS = [AUTO_SPEAKERS, 1, 2, 3, 4, 5, 6, 7, 8, 10]
+
+/** 选择框里的人数值：自动为 AUTO_SPEAKERS */
+function countValue(sel: HTMLSelectElement): number {
+  const n = Number(sel.value)
+  return Number.isInteger(n) && n >= 0 ? n : AUTO_SPEAKERS
+}
 
 let startInited = false
 let appsSupported = true
@@ -69,7 +75,7 @@ async function loadList(): Promise<void> {
     for (const [id, n] of [['meeting-speakers', s.meetingSpeakers], ['meeting-remote', s.meetingRemoteSpeakers]] as const) {
       const sel = $(id) as HTMLSelectElement
       for (const c of SPEAKER_COUNTS) sel.add(new Option(String(c), String(c)))
-      sel.value = String(n || 2)
+      sel.value = String(SPEAKER_COUNTS.includes(n) ? n : AUTO_SPEAKERS)
     }
     ;($('meeting-source') as HTMLSelectElement).value = s.meetingSource || 'mic'
     // 上次只用麦克风（没用过或没在用线上会议）：当作没有偏好，默认选第一个通话软件；否则沿用上次的选择（空 = 全部系统声音）
@@ -192,8 +198,9 @@ function updateSourceUi(): void {
   $('meeting-app').classList.toggle('hidden', source === 'mic')
   local.classList.toggle('hidden', source === 'app')
   remote.classList.toggle('hidden', source === 'mic')
-  for (const o of Array.from(local.options)) o.text = source === 'mixed' ? `现场 ${o.value} 人` : `参会 ${o.value} 人`
-  for (const o of Array.from(remote.options)) o.text = source === 'mixed' ? `线上 ${o.value} 人` : `参会 ${o.value} 人`
+  const label = (o: HTMLOptionElement, who: string) => (o.text = Number(o.value) === AUTO_SPEAKERS ? `${who}人数：自动` : `${who} ${o.value} 人`)
+  for (const o of Array.from(local.options)) label(o, source === 'mixed' ? '现场' : '参会')
+  for (const o of Array.from(remote.options)) label(o, source === 'mixed' ? '线上' : '参会')
   $('meeting-source-hint').textContent = !appsSupported
     ? api.platform === 'darwin'
       ? '截取会议软件的声音需要 macOS 14.2 或更新版本'
@@ -243,8 +250,8 @@ $('btn-meeting-start').addEventListener('click', async () => {
   const r = await api.meeting.start({
     title,
     source,
-    expectedSpeakers: Number(($('meeting-speakers') as HTMLSelectElement).value) || 2,
-    expectedRemote: Number(($('meeting-remote') as HTMLSelectElement).value) || 2,
+    expectedSpeakers: countValue($('meeting-speakers') as HTMLSelectElement),
+    expectedRemote: countValue($('meeting-remote') as HTMLSelectElement),
     appBundleId: appSel.value,
     appName: appSel.value ? (appSel.selectedOptions[0]?.dataset.name ?? appSel.value) : '系统声音'
   })
@@ -346,31 +353,34 @@ function renderSpeakerBar(): void {
       : model === 'error' || model === 'missing'
         ? '声纹模型未就绪，暂时无法区分说话人（可在 设置 → 声纹 下载）'
         : d.speakerList.length
-          ? '按参会人数和声音区分 · 点名字改名'
+          ? (d.source === 'app' ? [d.expectedRemote] : d.source === 'mixed' ? [d.expectedSpeakers, d.expectedRemote] : [d.expectedSpeakers]).includes(AUTO_SPEAKERS)
+            ? '按声音自动判断人数，判错时可改人数或合并说话人 · 点名字改名'
+            : '按参会人数和声音区分 · 点名字改名'
           : isLiveHere()
             ? '有人说话后自动区分说话人'
             : ''
   bar.appendChild(hint)
 }
 
-/** 某一路的人数：随时改，立即按新人数重新区分（D-020、D-033） */
+/** 某一路的人数：随时改，立即按新人数重新区分（D-020、D-033）；自动时显示目前分出的人数（D-042） */
 function countSelect(d: MeetingDetail, track: MeetingTrack): HTMLSelectElement {
   const expected = track === 1 ? d.expectedRemote : d.expectedSpeakers
   const count = document.createElement('select')
   count.className = 'count-select'
   count.title = '改人数后立即按新人数重新区分说话人'
-  if (!expected) {
+  if (expected === null) {
     const unset = new Option('人数：未设置', '')
     unset.disabled = true
     count.add(unset)
   }
-  for (const n of SPEAKER_COUNTS) count.add(new Option(`${n} 人`, String(n)))
-  count.value = expected ? String(expected) : ''
+  const found = d.speakerList.filter((x) => x.track === track).length
+  for (const n of SPEAKER_COUNTS) count.add(new Option(n === AUTO_SPEAKERS ? (expected === AUTO_SPEAKERS && found ? `自动（${found} 人）` : '自动') : `${n} 人`, String(n)))
+  count.value = expected === null ? '' : String(expected)
   count.addEventListener('change', async () => {
-    const n = Number(count.value)
-    if (!n) return
+    if (count.value === '') return
+    const n = countValue(count)
     const r = await api.meeting.setExpected(d.id, n, track)
-    toast(r.ok ? `已按 ${n} 人重新区分说话人` : r.error ?? '无法重新区分', r.ok ? 2200 : 4000)
+    toast(r.ok ? (n === AUTO_SPEAKERS ? '已改为按声音自动判断人数' : `已按 ${n} 人重新区分说话人`) : (r.error ?? '无法重新区分'), r.ok ? 2200 : 4000)
   })
   return count
 }

@@ -48,6 +48,7 @@ export interface SpeakerRow {
   voiceprint_id: number | null
   centroid: Float32Array | null
   track: MeetingTrack
+  auto_named: number // 1 = 名字由声纹自动认出（D-042）
 }
 
 export interface SegmentRow {
@@ -248,11 +249,15 @@ export function addSpeaker(meetingId: string, track: MeetingTrack = 0, name: str
   return Number(info.lastInsertRowid)
 }
 
-export function updateSpeaker(id: number, patch: Partial<{ name: string | null; voiceprintId: number | null; centroid: Float32Array | null }>): void {
+export function updateSpeaker(
+  id: number,
+  patch: Partial<{ name: string | null; voiceprintId: number | null; centroid: Float32Array | null; autoNamed: boolean }>
+): void {
   const d = database()
   if ('name' in patch) d.prepare(`UPDATE meeting_speakers SET name = ? WHERE id = ?`).run(patch.name, id)
   if ('voiceprintId' in patch) d.prepare(`UPDATE meeting_speakers SET voiceprint_id = ? WHERE id = ?`).run(patch.voiceprintId, id)
   if ('centroid' in patch) d.prepare(`UPDATE meeting_speakers SET centroid = ? WHERE id = ?`).run(toBlob(patch.centroid ?? null), id)
+  if ('autoNamed' in patch) d.prepare(`UPDATE meeting_speakers SET auto_named = ? WHERE id = ?`).run(patch.autoNamed ? 1 : 0, id)
 }
 
 /** 合并说话人：from 的句子全部归到 into，删除 from（from 的名字在 into 没名字时继承） */
@@ -261,7 +266,7 @@ export function mergeSpeakers(from: number, into: number): void {
   d.transaction(() => {
     const a = getSpeaker(from)
     const b = getSpeaker(into)
-    if (a && b && !b.name && a.name) d.prepare(`UPDATE meeting_speakers SET name = ?, voiceprint_id = ? WHERE id = ?`).run(a.name, a.voiceprint_id, into)
+    if (a && b && !b.name && a.name) d.prepare(`UPDATE meeting_speakers SET name = ?, voiceprint_id = ?, auto_named = ? WHERE id = ?`).run(a.name, a.voiceprint_id, a.auto_named, into)
     d.prepare(`UPDATE meeting_segments SET speaker_id = ? WHERE speaker_id = ?`).run(into, from)
     d.prepare(`DELETE FROM meeting_speakers WHERE id = ?`).run(from)
   })()

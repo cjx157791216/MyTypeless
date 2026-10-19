@@ -60,8 +60,12 @@
 | 按窗口找换人 | `splitByWindows`、`WINDOW_MS` | 已区分出各人后，句内每 0.5 秒取 1.5 秒与各人比较，在归属变化处切开 | D-025 |
 | 边录边降噪 | `denoiser`、`dnfeed`、`MEETING_VAD_DENOISED` | 会议录音用 GTCRN 流式降噪，降噪后的声音只用于分句（识别、声纹用原始录音） | D-024 |
 | 音量归一 | `normalizeLoudness` | 识别前把一句话放大到正常说话的音量（最多 30 dB、不削顶） | D-024 |
-| 声纹匹配分 | `printScore`、`identifySpeakers`、`PRINT_MATCH` | 一组声音与已保存声纹的平均相似度 ÷ 声纹自身的一致度；≥ 0.65 且至少 2 句才认，一个声纹在一场会议只给一个人 | D-022 |
-| 平均相似度（平均链接） | `SAME_SPEAKER`、`regroup` | 一段与某人每段声纹相似度的平均值，“是不是同一个人”统一用它判断（门槛 0.55）；会议中定期与结束时用它按参会人数整体重新归类 | D-019、D-021 |
+| 声纹匹配分 | `printScore`、`identifySpeakers`、`PRINT_MATCH` | 一组声音的平均声纹与已保存声纹各减去背景声音后的余弦；≥ 0.6 且至少 3 句才认，一个声纹在一场会议只给一个人 | D-022、D-042 |
+| 背景声音 | `SPEAKER_BACKGROUND` | 许多人声纹的平均方向（公开数据集算出，随声纹模型固定），认人前从两边减去，去掉同一麦克风、同一房间给所有人加上的相同成分 | D-042 |
+| 自动认出的名字 | `meeting_speakers.auto_named`、`PRINT_KEEP` | 由声纹库自动标出的名字（用户改过名的不算）；每次整体重新区分后复核，分数低于 0.5 撤掉 | D-042 |
+| 平均相似度（平均链接） | `SAME_SPEAKER`、`regroup` | 一段与某人每段声纹相似度的平均值，“是不是同一个人”统一用它判断（在线归入门槛 0.57）；会议中定期与结束时用它整体重新归类 | D-019、D-021 |
+| 自动人数 | `AUTO_SPEAKERS`（0）、`expected_speakers = 0`、`meetingSpeakers = 0` | 参会人数选「自动」：按声音判断有几个人（反复合并“分不开”的两组），最多 10 人；`null` 仍表示较早没设人数的会议 | D-042 |
+| 分得开 | `SEPARATE_RATIO`、`SEPARATE_SE`、`MIN_GROUP`、`MINOR_SHARE`、`MINOR_RATIO` | 两组声音是不是两个人：组间平均相似度加抽样误差低于较散一组组内相似度的 0.8 倍；不到 3 句、或占比不到 5% 又与大组不够远的小组不单算一个人 | D-042 |
 | 会议纪要 | `minutes` | 会后由 LLM 生成的 Markdown：头部本地生成，正文五节 | D-015 |
 | 临时录音 | `meetings.audio_path`（`userData/meetings/*.pcm`） | 会议期间保存在本机的录音，整理完删除 | D-016 |
 | 应用声音 | `mt-audiotap`、`AppAudioCapture`、`meetings.app_audio_path` | 会议软件等其他应用播放出来的声音（线上会议里对方的声音），由 Core Audio process tap 截取，会议期间临时保存在本机 | D-033 |

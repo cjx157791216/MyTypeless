@@ -96,10 +96,10 @@ export interface Settings {
   learnStyle: boolean // 风格学习：保存写入后被改过的结果，润色时作为示例（D-041）；默认关
   styleNote: string // 个人风格说明：用户手写的润色要求（D-041）
   appMode: AppMode // 主窗口当前模式：个人（听写）/ 会议（D-015、D-017）
-  meetingSpeakers: number // 上次开会选的参会人数（托盘开会也用它；D-021）；麦克风 + 应用声音时为现场人数
+  meetingSpeakers: number // 上次开会选的参会人数（托盘开会也用它；D-021）；AUTO_SPEAKERS = 自动（D-042，新用户默认）；麦克风 + 应用声音时为现场人数
   meetingSource: MeetingSource // 上次开会选的声音来源（D-033）
   meetingApp: string // 上次截取声音的应用 bundleId；空 = 全部系统声音
-  meetingRemoteSpeakers: number // 上次选的线上人数（应用声音里有几个人）
+  meetingRemoteSpeakers: number // 上次选的线上人数（应用声音里有几个人；AUTO_SPEAKERS = 自动）
   autoCheckUpdates: boolean // 启动后与每 6 小时检查一次新版本（只读发布地址的版本说明，D-028）
 }
 
@@ -182,8 +182,8 @@ export interface MeetingSummary {
 export interface MeetingDetail extends MeetingSummary {
   source: MeetingSource
   appName: string | null // 截取声音的应用（全部系统声音时为“系统声音”）
-  expectedSpeakers: number | null // 麦克风这一路（现场）的人数
-  expectedRemote: number | null // 应用声音这一路（线上）的人数
+  expectedSpeakers: number | null // 麦克风这一路（现场）的人数；AUTO_SPEAKERS = 自动；null = 较早没设人数的会议
+  expectedRemote: number | null // 应用声音这一路（线上）的人数（同上）
   speakerList: MeetingSpeaker[]
   segments: MeetingSegment[]
   minutes: string | null // Markdown
@@ -256,6 +256,9 @@ export interface SessionProgress {
 }
 
 // IPC 通道名（统一前缀 mt:）
+/** 参会人数“自动”：按声音判断人数（D-042）。设置与会议记录里人数为 0 即自动 */
+export const AUTO_SPEAKERS = 0
+
 export const IPC = {
   // 录音控制（renderer floating-bar → main）
   sessionStart: 'mt:session-start', // (mode?: FeatureMode)

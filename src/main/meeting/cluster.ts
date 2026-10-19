@@ -9,18 +9,31 @@
  * 门槛按真实会议录音标定（AliMeeting 远场 3 场 × 4 人、1～3 秒短段，D-026）：换模型后保持“把不同的人并成一个”的比例与原门槛相同。
  */
 
-/** 声纹模型标识：不同模型的声纹不能互相比较（会议与声纹都记下用的是哪个模型） */
+import { SPEAKER_BACKGROUND } from './background.ts'
+import { AUTO_SPEAKERS } from '../../shared/types.ts'
+
+/** 声纹模型标识：不同模型的声纹不能互相比较（会议与声纹都记下用的是哪个模型；换模型时同时重算 SPEAKER_BACKGROUND） */
 export const EMBED_MODEL = 'eres2netv2-zh-cn'
 
 export const SAME_SPEAKER = 0.57 // 平均相似度达到此值视为同一人（在线归入、句内合并；不同人误并约 0.1%）
-// 整体归类只按参会人数（D-021）：不再按声音自动判断人数——真实会议多是 1～2 秒短句，同一人两句常低到 0.1～0.3，
-// 不同人之间也可能到 0.4，任何固定门槛都会两头出错（拆成十几人，或把说得少的一方并掉）
-export const KNOWN_CUT = 0.45 // 初分门槛（不同人误并约 1.4%）；之后取发言最多的 k 组为主、逐段重新归属
+export const KNOWN_CUT = 0.45 // 初分门槛（不同人误并约 1.4%）：先切成细分组，再按“分不分得开”合并（D-042）
 export const MIN_EMBED_MS = 800 // 短于此的段声纹不可靠：不参与归类，跟随上下文
-// 认人（D-022）：一组与声纹的平均相似度 ÷ 声纹自身的一致度（|声纹|²，即保存时这人各句两两的平均相似度）。
-// 不用固定门槛：有的人声音起伏大，自己各句之间平均只有 0.5，固定 0.55 连保存声纹的那场会议都认不出来
-export const PRINT_MATCH = 0.7 // 真实会议 3 句一组：误认 1.8%、漏认 0.9%（0.65 时误认 4% 以上）
-export const PRINT_MIN_SEGMENTS = 2 // 至少说过这么多句才认（单句不稳）
+export { AUTO_SPEAKERS }
+// 两组“分得开”（D-042）：组间平均相似度 + 抽样误差（SEPARATE_SE / √较小一组的句数）< SEPARATE_RATIO × 较散一组的组内平均相似度。
+// 用组内相似度做尺子而不是固定门槛：同一声源下各人的相似度一起升降（AliMeeting 远场同一人组内约 0.53，近讲约 0.68）
+export const SEPARATE_RATIO = 0.8
+export const SEPARATE_SE = 0.15
+export const AUTO_MAX = 10 // 自动人数最多分出这么多人（与人数选项的上限一致）
+export const MIN_GROUP = 3 // 至少这么多句才算一个独立的人（只说一两句的人声纹太少，分不清是人还是杂音）
+// 自动人数：句数不到这一路 MINOR_SHARE 的小组，与最像的大组的平均相似度还要低于大组组内的 MINOR_RATIO 倍才算另一个人——
+// 长会议里同一个人的咳嗽、笑声、离麦远的话常自成一个十几句的小组（与本人约 0.6～0.7 倍），真正说得少的人约 0.35 倍
+export const MINOR_SHARE = 0.05
+export const MINOR_RATIO = 0.55
+// 认人（D-022、D-042）：一组的平均声纹与保存的声纹各减去背景声音后的余弦（printScore）。
+// 不减背景时同一房间的不同人也很像：没到场的人约 7% 会被认成库里的同事，而本人跨会议常只有 0.68～0.75
+export const PRINT_MATCH = 0.6 // AliMeeting 同场 3 句一组：误认 0.4%、漏认 0.5%；真实跨会议本人 ≥ 0.62、别人 ≤ 0.48
+export const PRINT_KEEP = 0.5 // 自动认出的名字：整体归类后这一组的分数低于此值就撤掉（组里的人变了）
+export const PRINT_MIN_SEGMENTS = 3 // 至少说过这么多句才认（两句一组误认明显更多）
 
 export function normalize(v: ArrayLike<number>): Float32Array {
   let n = 0
@@ -156,9 +169,118 @@ export interface RegroupResult {
   sizes: Map<number, number>
 }
 
+/** 一组的组内平均相似度（两两，不含自身）；单段没有组内相似度 */
+function cohesion(g: Group): number | null {
+  return g.n > 1 ? (dot(g.sum, g.sum) - g.n) / (g.n * (g.n - 1)) : null
+}
+
+/** 两组分不开的程度（≥ 0 即分不开，D-042）：组间平均相似度 + 抽样误差 − SEPARATE_RATIO × 较散一组的组内相似度 */
+function inseparability(link: number, na: number, nb: number, ca: number | null, cb: number | null): number {
+  const coh = Math.min(ca ?? cb ?? SAME_SPEAKER, cb ?? ca ?? SAME_SPEAKER)
+  return link + SEPARATE_SE / Math.sqrt(Math.min(na, nb)) - SEPARATE_RATIO * coh
+}
+
 /**
- * 按参会人数 k 整体重新区分说话人（会议进行中定期、结束时、用户改人数时）：对所有有声纹的段做平均链接层次聚类
- * （最近邻链算法，O(n²)，4 小时会议也只需零点几秒），取发言最多的 k 组为主，每段重新归到平均最像的一组（迭代 3 次）。
+ * 候选组反复合并最分不开的一对（不合并约束标签不同的两组）：k 有值时合并到 k 组，否则合并到两两都分得开为止（最多 AUTO_MAX 组）。
+ * 维护组间点积矩阵，每次合并只更新一行，长会议上百个候选组也很快。
+ */
+function mergeCandidates(groups: number[][], vecs: Float32Array[], dim: number, k: number | null, clash: (a: number[], b: number[]) => boolean): number[][] {
+  const sums = groups.map((ms) => {
+    const g = new Group(dim)
+    for (const i of ms) g.add(vecs[i])
+    return g
+  })
+  const m = groups.length
+  const D = new Float64Array(m * m) // D[a·m+b] = 两组归一化向量之和的点积
+  for (let a = 0; a < m; a++) for (let b = a; b < m; b++) D[a * m + b] = D[b * m + a] = dot(sums[a].sum, sums[b].sum)
+  const size = groups.map((ms) => ms.length)
+  const alive = new Array<boolean>(m).fill(true)
+  const coh = (a: number) => (size[a] > 1 ? (D[a * m + a] - size[a]) / (size[a] * (size[a] - 1)) : null)
+  let count = m
+  while (count > 1 && !(k && count <= k)) {
+    let worst = -Infinity
+    let pa = -1
+    let pb = -1
+    for (let a = 0; a < m; a++) {
+      if (!alive[a]) continue
+      for (let b = a + 1; b < m; b++) {
+        if (!alive[b] || clash(groups[a], groups[b])) continue
+        const bad = inseparability(D[a * m + b] / (size[a] * size[b]), size[a], size[b], coh(a), coh(b))
+        if (bad > worst) {
+          worst = bad
+          pa = a
+          pb = b
+        }
+      }
+    }
+    if (pa < 0 || (!k && worst < 0 && count <= AUTO_MAX)) break
+    D[pa * m + pa] += D[pb * m + pb] + 2 * D[pa * m + pb]
+    for (let c = 0; c < m; c++) if (c !== pa && alive[c]) D[pa * m + c] = D[c * m + pa] = D[pa * m + c] + D[pb * m + c]
+    size[pa] += size[pb]
+    groups[pa] = [...groups[pa], ...groups[pb]]
+    alive[pb] = false
+    count--
+  }
+  return groups.filter((_, a) => alive[a])
+}
+
+/**
+ * 自动人数的复检（D-042）：返回该并掉的一组及并入的组 [from, into]，没有则 null。依次检查：
+ * 少于 MIN_GROUP 句的组；占这一路不到 MINOR_SHARE、又与最像的大组不够远的小组（多半是同一人的杂音）；两两分不开的组。
+ * 有约束标签（用户指定、命名过）的组不当作小组并掉。
+ */
+function weakestPair(
+  groups: Array<{ ms: number[]; g: Group }>,
+  total: number,
+  tagged: (a: number) => boolean,
+  clash: (a: number, b: number) => boolean
+): [number, number] | null {
+  const link = (a: number, b: number) => (groups[a].g.n && groups[b].g.n ? dot(groups[a].g.sum, groups[b].g.sum) / (groups[a].g.n * groups[b].g.n) : 0)
+  const nearest = (a: number) => {
+    let best = -1
+    let bestLink = -Infinity
+    for (let b = 0; b < groups.length; b++) {
+      if (b === a || clash(a, b)) continue
+      const l = link(a, b)
+      if (l > bestLink) {
+        bestLink = l
+        best = b
+      }
+    }
+    return best
+  }
+  const bySize = groups.map((_, a) => a).sort((a, b) => groups[a].g.n - groups[b].g.n)
+  for (const a of bySize) {
+    if (tagged(a)) continue
+    const near = nearest(a)
+    if (near < 0) continue
+    const g = groups[a].g
+    const big = groups[near].g
+    if (g.n < MIN_GROUP) return [a, near]
+    if (g.n < MINOR_SHARE * total && g.n < big.n && link(a, near) > MINOR_RATIO * (cohesion(big) ?? SAME_SPEAKER)) return [a, near]
+  }
+  let worst = 0
+  let pair: [number, number] | null = null
+  for (let a = 0; a < groups.length; a++) {
+    for (let b = a + 1; b < groups.length; b++) {
+      if (clash(a, b)) continue
+      const A = groups[a].g
+      const B = groups[b].g
+      const bad = inseparability(link(a, b), A.n, B.n, cohesion(A), cohesion(B))
+      if (bad >= worst) {
+        worst = bad
+        pair = A.n <= B.n ? [a, b] : [b, a]
+      }
+    }
+  }
+  if (pair && tagged(pair[0]) && !tagged(pair[1])) pair = [pair[1], pair[0]]
+  return pair
+}
+
+/**
+ * 整体重新区分说话人（会议进行中定期、结束时、用户改人数时）：对所有有声纹的段做平均链接层次聚类
+ * （最近邻链算法，O(n²)，4 小时会议也只需零点几秒），切成细分组后反复合并最分不开的两组——
+ * 已知人数 k 时合并到 k 组，人数为 AUTO_SPEAKERS 时合并到两两都分得开并复检（D-042）；之后每段重新归到平均最像的一组（迭代 3 次）。
  * 没有人数（较早的会议）时不重新聚类，只按现有归属计算每人的平均向量。
  * 约束：锁定（用户手动指定）的段、用户命名过的不同说话人不会被并到一起。
  * 结果映射回已有的说话人编号（尽量保持编号与名字不变），多出来的人用 create 新建。
@@ -232,6 +354,7 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
 
   // 切树：按相似度从高到低应用合并（平均链接可约，即为贪心结果）
   merges.sort((x, y) => y.s - x.s)
+  const auto = opts.expected === AUTO_SPEAKERS
   const k = opts.expected && opts.expected > 0 ? opts.expected : null
   const cutAt = (cut: number, maxMerges = Infinity): number[][] => {
     const root = Array.from({ length: n }, (_, i) => i)
@@ -261,59 +384,91 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
     return g
   }
   const tagOf = (ms: number[]) => ms.map((i) => tag[i]).find((t) => t !== null) ?? null
+  const clash = (a: number[], b: number[]) => {
+    const ta = tagOf(a)
+    const tb = tagOf(b)
+    return ta !== null && tb !== null && ta !== tb
+  }
   let clusterList: number[][]
-  if (k) {
-    // 已知人数：先按 KNOWN_CUT 切；簇不够就在更高处切出 k 个；取发言最多的 k 个为主，其余逐段重新归到最像的主簇
-    let cl = cutAt(KNOWN_CUT)
-    if (cl.length < k) cl = cutAt(-Infinity, n - k)
-    cl.sort((x, y) => durOf(y) - durOf(x))
-    const majors = cl.slice(0, k).map((ms) => [...ms])
-    const m = majors.length // 句子比参会人数少时（会议刚开始）簇数可能不到 k
+  if (k || auto) {
+    // 先按 KNOWN_CUT 切成细分组；有约束标签或至少 MIN_GROUP 句的组作为候选，反复把最分不开的两组合并：
+    // 已知人数合并到 k 组，自动人数合并到两两都分得开为止（D-042）。比“取发言最多的 k 组”更能留住说得少的人
+    let fine = cutAt(KNOWN_CUT)
+    if (k && fine.length < k) fine = cutAt(-Infinity, n - k)
+    fine.sort((x, y) => durOf(y) - durOf(x))
+    let cand = fine.filter((ms) => ms.length >= MIN_GROUP || tagOf(ms) !== null)
+    if (k && cand.length < k) cand = [...new Set([...cand, ...fine.slice(0, k)])]
+    if (!cand.length) cand = fine.slice(0, 1)
+    // 同一个约束标签（同一个命名过的人）的各组先并成一组：标签就是“这些是同一个人”
+    const byTag = new Map<number, number[]>()
+    const free: number[][] = []
+    for (const ms of cand) {
+      const t = tagOf(ms)
+      if (t === null) free.push(ms)
+      else byTag.set(t, [...(byTag.get(t) ?? []), ...ms])
+    }
+    cand = [...byTag.values(), ...free]
+    let majors = mergeCandidates(cand.map((ms) => [...ms]), vecs, dim, k, clash)
     const fixed = new Set<number>() // 有约束标签的段不挪动
     for (const ms of majors) for (const i of ms) if (tag[i] !== null) fixed.add(i)
-    let owner = new Array<number>(n).fill(-1)
-    majors.forEach((ms, j) => ms.forEach((i) => (owner[i] = j)))
-    for (let iter = 0; iter < 3; iter++) {
-      const sums = majors.map((_, j) => sumOf(owner.map((o, i) => (o === j ? i : -1)).filter((i) => i >= 0)))
-      const next = [...owner]
-      for (let i = 0; i < n; i++) {
-        if (fixed.has(i)) continue
-        let best = owner[i]
-        let bestSim = -Infinity
-        for (let j = 0; j < m; j++) {
-          const g = sums[j]
-          const self = owner[i] === j
-          const cnt = g.n - (self ? 1 : 0)
-          if (cnt <= 0) continue
-          const t = tagOf(majors[j])
-          if (tag[i] !== null && t !== null && t !== tag[i]) continue
-          const s = (dot(vecs[i], g.sum) - (self ? 1 : 0)) / cnt
-          if (s > bestSim) {
-            bestSim = s
-            best = j
-          }
-        }
-        next[i] = best
-      }
-      // 不能把某个人的段全部拉走（选了几个人就保证分出几个人）：留下与自己这组最像、相对最像别组差得最多的一段
-      for (let j = 0; j < m; j++) {
-        if (next.includes(j)) continue
-        let keep = -1
-        let margin = -Infinity
+    // 每段重新归到平均最像的主组（迭代 3 次）
+    const reassign = (majors: number[][]): number[] => {
+      const m = majors.length
+      let owner = new Array<number>(n).fill(-1)
+      majors.forEach((ms, j) => ms.forEach((i) => (owner[i] = j)))
+      for (let iter = 0; iter < 3; iter++) {
+        const sums = majors.map((_, j) => sumOf(owner.map((o, i) => (o === j ? i : -1)).filter((i) => i >= 0)))
+        const next = [...owner]
         for (let i = 0; i < n; i++) {
-          if (owner[i] !== j || fixed.has(i) || next[i] < 0) continue
-          const g = sums[j]
-          const own = g.n > 1 ? (dot(vecs[i], g.sum) - 1) / (g.n - 1) : 1
-          const to = sums[next[i]]
-          const other = to.n ? dot(vecs[i], to.sum) / to.n : 0
-          if (own - other > margin) {
-            margin = own - other
-            keep = i
+          if (fixed.has(i)) continue
+          let best = owner[i]
+          let bestSim = -Infinity
+          for (let j = 0; j < m; j++) {
+            const g = sums[j]
+            const self = owner[i] === j
+            const cnt = g.n - (self ? 1 : 0)
+            if (cnt <= 0) continue
+            const t = tagOf(majors[j])
+            if (tag[i] !== null && t !== null && t !== tag[i]) continue
+            const s = (dot(vecs[i], g.sum) - (self ? 1 : 0)) / cnt
+            if (s > bestSim) {
+              bestSim = s
+              best = j
+            }
           }
+          next[i] = best
         }
-        if (keep >= 0) next[keep] = j
+        // 不能把某个人的段全部拉走（选了几个人就保证分出几个人）：留下与自己这组最像、相对最像别组差得最多的一段
+        for (let j = 0; j < m; j++) {
+          if (next.includes(j)) continue
+          let keep = -1
+          let margin = -Infinity
+          for (let i = 0; i < n; i++) {
+            if (owner[i] !== j || fixed.has(i) || next[i] < 0) continue
+            const g = sums[j]
+            const own = g.n > 1 ? (dot(vecs[i], g.sum) - 1) / (g.n - 1) : 1
+            const to = sums[next[i]]
+            const other = to.n ? dot(vecs[i], to.sum) / to.n : 0
+            if (own - other > margin) {
+              margin = own - other
+              keep = i
+            }
+          }
+          if (keep >= 0) next[keep] = j
+        }
+        owner = next
       }
-      owner = next
+      return owner
+    }
+    let owner = reassign(majors)
+    // 自动人数：重新归属后再检验一遍——太小、像同一人杂音的小组、与别组分不开的组并掉后重做（最多 8 轮）
+    for (let round = 0; auto && round < 8 && majors.length > 1; round++) {
+      const groups = majors.map((ms, j) => ({ ms, g: sumOf(owner.map((o, i) => (o === j ? i : -1)).filter((i) => i >= 0)) }))
+      const pair = weakestPair(groups, n, (a) => tagOf(majors[a]) !== null, (a, b) => clash(majors[a], majors[b]))
+      if (!pair) break
+      const [from, into] = pair
+      majors = majors.map((ms, j) => (j === into ? [...ms, ...majors[from]] : ms)).filter((_, j) => j !== from)
+      owner = reassign(majors)
     }
     clusterList = majors.map((_, j) => owner.map((o, i) => (o === j ? i : -1)).filter((i) => i >= 0)).filter((ms) => ms.length)
   } else {
@@ -368,14 +523,27 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
   return { assign, merged, means, sizes }
 }
 
-/** 一组与声纹的匹配分：平均相似度 ÷ 声纹自身的一致度（同一人约 0.65～1，不同的人 ≤ 0.6） */
+/**
+ * 一组与声纹的匹配分（D-042）：两边的平均声纹各减去背景声音（SPEAKER_BACKGROUND）后的余弦。
+ * 同一人跨会议约 0.62～1，同一房间的别人 ≤ 0.5；不减背景时两者都在 0.5～0.9，同一房间里容易认错人。
+ */
 export function printScore(mean: ArrayLike<number>, print: ArrayLike<number>): number {
-  const self = dot(print, print)
-  return self > 0 ? dot(mean, print) / self : -1
+  const bg = mean.length === SPEAKER_BACKGROUND.length ? SPEAKER_BACKGROUND : null
+  let ab = 0
+  let aa = 0
+  let bb = 0
+  for (let i = 0; i < mean.length; i++) {
+    const x = mean[i] - (bg ? bg[i] : 0)
+    const y = print[i] - (bg ? bg[i] : 0)
+    ab += x * y
+    aa += x * x
+    bb += y * y
+  }
+  return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : -1
 }
 
 /**
- * 按声纹库给本场的说话人认名字（D-022）：每组（平均向量 + 段数）与每个声纹打分，达到 PRINT_MATCH 的配对按分数从高到低
+ * 按声纹库给本场的说话人认名字（D-022、D-042）：每组（平均向量 + 段数，至少 PRINT_MIN_SEGMENTS 句）与每个声纹打分，达到 PRINT_MATCH 的配对按分数从高到低
  * 一一指派（一个声纹只给一个人；taken 是本场已用过的声纹）。返回 说话人 → 声纹 id。
  */
 export function identifySpeakers(

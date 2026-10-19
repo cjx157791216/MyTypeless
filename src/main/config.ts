@@ -61,10 +61,10 @@ export const DEFAULT_SETTINGS: Settings = {
   learnStyle: false,
   styleNote: '',
   appMode: 'personal',
-  meetingSpeakers: 2,
+  meetingSpeakers: 0, // 自动（AUTO_SPEAKERS，D-042）
   meetingSource: 'mic',
   meetingApp: '',
-  meetingRemoteSpeakers: 2,
+  meetingRemoteSpeakers: 0,
   autoCheckUpdates: true
 }
 

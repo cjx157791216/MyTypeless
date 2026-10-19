@@ -12,14 +12,19 @@ import { isHallucination } from '../text'
 import { pcm16ToWav } from '../wav'
 import { builtinReady, createBuiltinAsr, prewarmBuiltin } from '../whisper'
 import {
+  AUTO_SPEAKERS,
   MIN_EMBED_MS,
   OnlineClusterer,
+  PRINT_KEEP,
+  PRINT_MATCH,
+  PRINT_MIN_SEGMENTS,
   WINDOW_HOP_MS,
   WINDOW_MIN_PART_MS,
   WINDOW_MS,
   blendVoiceprint,
   identifySpeakers,
   mergeAdjacentParts,
+  printScore,
   regroup,
   splitByWindows,
   type ClusterItem,
@@ -84,7 +89,8 @@ interface Track {
   dnChain: Promise<void> // 降噪与分句（按录音顺序串行）
   dnSent: number // 已送去降噪的样本数
   segFed: number // 已送入分句的样本数（降噪输出或原始录音）
-  expected: number // 这一路的人数：会中最多分出这么多人（D-021）
+  expected: number // 这一路的人数：会中最多分出这么多人（D-021）；AUTO_SPEAKERS = 按声音判断（D-042）
+  autoCap: number // 自动人数时会中在线归类最多分出的人数：上次整体归类的人数 + 1（新来的人先单独成组，等下次整体归类确认）
   failed: Array<[number, number]> // 识别失败的句子（结束时重试）
   lastSpeaker: number | null
   newSegments: number // 上次整体重新归类之后新增的段数
@@ -238,6 +244,7 @@ export class MeetingManager {
       dnSent: 0,
       segFed: 0,
       expected: n,
+      autoCap: 2,
       failed: [],
       lastSpeaker: null,
       newSegments: 0,
@@ -517,7 +524,7 @@ export class MeetingManager {
     if (!sp || sp.meeting_id !== meetingId) return { remembered: false }
     let remembered = false
     const clean = name.trim() || null
-    store.updateSpeaker(speakerId, { name: clean })
+    store.updateSpeaker(speakerId, { name: clean, autoNamed: false }) // 用户改过名：不再按声纹复核（D-042）
     // 旧声纹模型的会议：声纹与当前声纹库不可比，只改名不保存声纹（D-026）
     if (clean && remember && store.usesCurrentModel(meetingId)) {
       const v = this.speakerVector(meetingId, sp.track, speakerId)
@@ -572,7 +579,7 @@ export class MeetingManager {
     return { ok: true }
   }
 
-  /** 改某一路的人数（0 = 现场 / 1 = 线上）：会议中或会后都立即按新人数重新区分这一路的说话人（D-020、D-033） */
+  /** 改某一路（0 = 现场 / 1 = 线上）的人数（AUTO_SPEAKERS = 自动）：会议中或会后都立即按新人数重新区分这一路的说话人（D-020、D-033、D-042） */
   setExpected(meetingId: string, count: number, track: MeetingTrack = 0): { ok: boolean; error?: string } {
     const n = speakerCount(count)
     const row = store.getMeetingRow(meetingId)
@@ -669,7 +676,7 @@ export class MeetingManager {
    */
   private processUtterance(a: Active, t: Track, u: Utterance): void {
     const whole: Part[] = [{ start: u.start, end: u.end }]
-    let canSplit = t.expected > 1 && speakerModel.ready() && samplesToMs(u.end - u.start) >= MIN_SPLIT_MS
+    let canSplit = t.expected !== 1 && speakerModel.ready() && samplesToMs(u.end - u.start) >= MIN_SPLIT_MS
     // 积压太多（电脑忙）：只算整句声纹，不做句内换人切分，让识别先跟上
     if (canSplit && overloaded(a.pending)) {
       canSplit = false
@@ -784,7 +791,7 @@ export class MeetingManager {
 
   /** 在线归类（名字由定期整体归类时按声纹库认出，见 applyRegroup） */
   private assignSpeaker(a: Active, t: Track, v: Float32Array): number {
-    return t.clusterer.assign(v, () => store.addSpeaker(a.id, t.track), t.expected).key
+    return t.clusterer.assign(v, () => store.addSpeaker(a.id, t.track), t.expected === AUTO_SPEAKERS ? t.autoCap : t.expected).key
   }
 
   private async transcribeRange(
@@ -881,7 +888,7 @@ export class MeetingManager {
       for (const s of trackSegs) {
         const v = embeddings.get(s.id)
         if (v && s.speakerId === null) {
-          const { key } = online.assign(v, () => store.addSpeaker(meetingId, track), expected ?? Infinity)
+          const { key } = online.assign(v, () => store.addSpeaker(meetingId, track), expected || Infinity)
           store.setSegmentSpeaker(s.id, key)
           s.speakerId = key
         }
@@ -895,7 +902,8 @@ export class MeetingManager {
         if (sp.voiceprint_id && sp.name) {
           const vp = prints.find((p) => p.id === sp.voiceprint_id)
           const n = counts.get(sp.id) ?? 0
-          if (vp && n) store.saveVoiceprint({ id: vp.id, name: vp.name, vector: blendVoiceprint(vp.vector, vp.samples, c, n), samples: vp.samples + n })
+          // 自动认出的人只在整场声音仍然很像时才更新声纹，免得认错一次把声纹带偏（D-042）
+          if (vp && n && (!sp.auto_named || printScore(c, vp.vector) >= PRINT_MATCH)) store.saveVoiceprint({ id: vp.id, name: vp.name, vector: blendVoiceprint(vp.vector, vp.samples, c, n), samples: vp.samples + n })
         }
       }
     }
@@ -915,7 +923,8 @@ export class MeetingManager {
     live: Track | null
   ): Map<number, Float32Array> & { changed?: boolean } {
     const segs = store.listSegments(meetingId).filter((s) => s.track === track)
-    const named = new Set(store.listSpeakers(meetingId).filter((s) => s.name && s.track === track).map((s) => s.id))
+    // 用户起过名的人是约束（不被并掉、句子不挪走）；声纹自动认出的名字不算——让整体归类能纠正，名字随后复核（D-042）
+    const named = new Set(store.listSpeakers(meetingId).filter((s) => s.name && !s.auto_named && s.track === track).map((s) => s.id))
     const items: ClusterItem[] = segs.map((s) => ({
       id: s.id,
       speaker: s.speakerId,
@@ -933,9 +942,19 @@ export class MeetingManager {
       }
     }
     store.pruneSpeakers(meetingId)
-    // 还没有名字的人：用整组声音按声纹库认（D-022；本场已用过的声纹不再给别人，两路一起算；旧声纹模型的会议不认，D-026）
-    if (!store.usesCurrentModel(meetingId)) prints = []
-    const speakers = store.listSpeakers(meetingId)
+    if (!store.usesCurrentModel(meetingId)) prints = [] // 旧声纹模型的会议不认（D-026）
+    // 声纹自动认出的名字先复核：组里的人变了、分数掉到 PRINT_KEEP 以下就撤掉，下面重新认（D-042）
+    for (const sp of store.listSpeakers(meetingId)) {
+      if (sp.track !== track || !sp.auto_named || !sp.voiceprint_id) continue
+      const mean = result.means.get(sp.id)
+      const vp = prints.find((p) => p.id === sp.voiceprint_id)
+      // 这一组可用的声纹太少（短句为主）、声纹已被删除：保留原名
+      if (!mean || !vp || (result.sizes.get(sp.id) ?? 0) < PRINT_MIN_SEGMENTS || printScore(mean, vp.vector) >= PRINT_KEEP) continue
+      store.updateSpeaker(sp.id, { name: null, voiceprintId: null, autoNamed: false })
+      changed = true
+    }
+    // 还没有名字的人：用整组声音按声纹库认（D-022；本场已用过的声纹不再给别人，两路一起算）
+    let speakers = store.listSpeakers(meetingId)
     const taken = new Set(speakers.flatMap((sp) => (sp.voiceprint_id ? [sp.voiceprint_id] : [])))
     const groups = speakers.flatMap((sp) => {
       const mean = result.means.get(sp.id)
@@ -944,18 +963,48 @@ export class MeetingManager {
     for (const [key, id] of identifySpeakers(groups, prints, taken)) {
       const vp = prints.find((p) => p.id === id)
       if (!vp) continue
-      store.updateSpeaker(key, { name: vp.name, voiceprintId: vp.id })
+      store.updateSpeaker(key, { name: vp.name, voiceprintId: vp.id, autoNamed: true })
       changed = true
     }
+    // 自动人数：同一个声纹的人被拆成了两组（还没名字的一组也很像这一路里已认出的某人，且最像的就是他）——并回去（D-042）
+    const moved = new Map<number, number>()
+    if (expected === AUTO_SPEAKERS) {
+      speakers = store.listSpeakers(meetingId)
+      const holders = speakers.filter((sp) => sp.track === track && sp.voiceprint_id && result.means.has(sp.id))
+      for (const sp of speakers) {
+        const mean = result.means.get(sp.id)
+        const n = result.sizes.get(sp.id) ?? 0
+        if (sp.track !== track || sp.name || !mean || n < PRINT_MIN_SEGMENTS) continue
+        if (segs.some((s) => s.locked && result.assign.get(s.id) === sp.id)) continue // 用户手动指定过句子的人不动
+        let best: { id: number; s: number } | null = null
+        for (const p of prints) {
+          const s = printScore(mean, p.vector)
+          if (!best || s > best.s) best = { id: p.id, s }
+        }
+        const holder = best && best.s >= PRINT_MATCH ? holders.find((h) => h.voiceprint_id === best!.id) : undefined
+        if (!holder) continue
+        store.mergeSpeakers(sp.id, holder.id)
+        moved.set(sp.id, holder.id)
+        const hm = result.means.get(holder.id)!
+        const hn = result.sizes.get(holder.id) ?? 0
+        result.means.set(holder.id, blendVoiceprint(hm, hn, mean, n))
+        result.sizes.set(holder.id, hn + n)
+        result.means.delete(sp.id)
+        result.sizes.delete(sp.id)
+        changed = true
+      }
+    }
+    const finalOf = (sp: number | undefined) => (sp === undefined ? sp : (moved.get(sp) ?? sp))
     if (live) {
       live.clusterer.clear()
       for (const s of segs) {
         const v = embeddings.get(s.id)
-        const sp = result.assign.get(s.id)
+        const sp = finalOf(result.assign.get(s.id))
         if (v && sp !== undefined) live.clusterer.seed(sp, v)
       }
       const last = segs.at(-1)
-      if (last) live.lastSpeaker = result.assign.get(last.id) ?? live.lastSpeaker
+      if (last) live.lastSpeaker = finalOf(result.assign.get(last.id)) ?? live.lastSpeaker
+      live.autoCap = Math.max(2, result.means.size + 1)
     }
     return Object.assign(result.means, { changed })
   }
@@ -1014,9 +1063,9 @@ export class MeetingManager {
   }
 }
 
-/** 参会人数：1～MAX_SPEAKERS，无效时取 2 */
+/** 参会人数：1～MAX_SPEAKERS，或 AUTO_SPEAKERS（按声音判断，D-042）；无效时取自动 */
 function speakerCount(n: number | null | undefined): number {
-  return n && Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_SPEAKERS) : 2
+  return n && Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_SPEAKERS) : AUTO_SPEAKERS
 }
 
 function defaultTitle(ts: number): string {

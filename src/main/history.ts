@@ -150,6 +150,8 @@ function migrateColumns(): void {
   if (!segCols.has('track')) d.exec(`ALTER TABLE meeting_segments ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
   const speakerCols = new Set((d.prepare(`PRAGMA table_info(meeting_speakers)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!speakerCols.has('track')) d.exec(`ALTER TABLE meeting_speakers ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
+  // 名字是声纹自动认出的（D-042）：整体归类后会复核，分数掉下去就撤掉；用户改过名的为 0（已有的名字都当作用户确认过）
+  if (!speakerCols.has('auto_named')) d.exec(`ALTER TABLE meeting_speakers ADD COLUMN auto_named INTEGER NOT NULL DEFAULT 0`)
   const printCols = new Set((d.prepare(`PRAGMA table_info(voiceprints)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!printCols.has('model')) {
     d.exec(`ALTER TABLE voiceprints ADD COLUMN model TEXT`)
