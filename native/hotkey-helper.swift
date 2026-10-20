@@ -7,7 +7,11 @@
 //   若该键与按住的 fn 组成了另一条注册的组合（如 fn+space、fn+shift），先 abort 再发那条组合的 down
 // 设计: 只匹配已注册快捷键，不做按键记录；命中的触发键被吞掉（避免 Option+Space 落入不换行空格），
 //       单修饰键触发不吞（避免修饰键状态卡死）。父进程退出即退出。
+// 🌐 键: 多数 Mac 报为 63 号键（flagsChanged + SecondaryFn），有的键盘 / 系统版本报为 179 号键的 keyDown/keyUp，
+//       也有两种都报的：两种都认作 fn，同一次按键只算一次。
 // 权限: 需要“辅助功能”。无权限时 exit(3)。
+// 测试: mt-hotkey '<config-json>' --replay —— 不建 tap、不需要权限，从 stdin 逐行读 "<键名> down|up"
+//       （键名同 key，另有 globe = 179 号键），造出与真实键盘相同的事件交给同一个处理函数；被吞的按键另输出 {"swallowed":"<行>"}。
 
 import ApplicationServices
 import CoreGraphics
@@ -24,6 +28,7 @@ struct Config: Codable {
 }
 
 let configJSON = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+let replayMode = CommandLine.arguments.dropFirst(2).contains("--replay")
 guard !configJSON.isEmpty,
       let data = configJSON.data(using: .utf8),
       let cfg = try? JSONDecoder().decode(Config.self, from: data),
@@ -55,6 +60,9 @@ let keyTable: [String: UInt64] = [
     "fn": 63,
     "shift": 56 // 仅用于组合（如 fn+shift），左右 Shift 都算
 ]
+
+/// 🌐 键的另一种报法（有的键盘 / 系统版本把 🌐 报为这个键码的 keyDown/keyUp）
+let globeKeycode: UInt64 = 179
 
 // 单修饰键：keycode → 设备相关标志位（IOLLEvent.h NX_DEVICE*KEYMASK；fn 用 SecondaryFn）
 let modifierDeviceMask: [UInt64: UInt64] = [
@@ -135,61 +143,59 @@ DispatchQueue.global().async {
     }
 }
 
-if !AXIsProcessTrusted() {
-    FileHandle.standardError.write("accessibility not granted\n".data(using: .utf8)!)
-    exit(3)
-}
-
 var active: Rule? = nil
 var gTap: CFMachPort? = nil
+/// 这台 Mac 报过 63 号 🌐 事件：之后 179 号只是同一次按键的另一种报法，一律忽略（避免一次按键触发两次）
+var sawFnKeycode = false
 
 let eventMask = (1 << CGEventType.keyDown.rawValue)
     | (1 << CGEventType.keyUp.rawValue)
     | (1 << CGEventType.flagsChanged.rawValue)
 
-let callback: CGEventTapCallBack = { _, type, event, _ in
+/// 处理一个键盘事件：返回 true 放行，false 吞掉
+func handleEvent(_ type: CGEventType, _ event: CGEvent) -> Bool {
     switch type {
-    case .tapDisabledByTimeout, .tapDisabledByUserInput:
-        // 系统在回调超时/安全输入时会禁用 tap；必须重新启用，否则快捷键会“失灵”
-        if let t = gTap { CGEvent.tapEnable(tap: t, enable: true) }
-        return Unmanaged.passUnretained(event)
-
     case .keyDown, .keyUp:
         let kc = UInt64(event.getIntegerValueField(.keyboardEventKeycode))
         let isDown = type == .keyDown
+        if kc == globeKeycode {
+            handleGlobe(isDown, event.flags)
+            return true // 不吞：系统对 🌐 的处理（表情面板等）发生在 tap 之下，吞了也拦不住
+        }
         if let a = active {
             if a.modifierOnly {
-                guard isDown else { return Unmanaged.passUnretained(event) }
+                guard isDown else { return true }
                 // 按住 fn 时按下的键若组成另一条注册组合（如 fn+space）：撤销当前触发，改发那条组合
                 if event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
                    let combo = rules.first(where: { !$0.modifierOnly && $0.trigger == kc && modifiersMatch(event.flags, $0) }) {
                     emit(a.name, "abort")
                     emit(combo.name, "down")
                     active = combo
-                    return nil
+                    return false
                 }
                 // 否则视为普通组合键使用（如 fn+方向键），放弃本次触发
                 emit(a.name, "abort")
                 active = nil
-                return Unmanaged.passUnretained(event)
+                return true
             }
             if kc == a.trigger {
                 if !isDown {
                     emit(a.name, "up")
                     active = nil
                 }
-                return nil // 吞掉 trigger 键（含按住时的重复 keydown）
+                return false // 吞掉 trigger 键（含按住时的重复 keydown）
             }
         } else if isDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
             for r in rules where !r.modifierOnly && kc == r.trigger && modifiersMatch(event.flags, r) {
                 emit(r.name, "down")
                 active = r
-                return nil
+                return false
             }
         }
 
     case .flagsChanged:
         let kc = UInt64(event.getIntegerValueField(.keyboardEventKeycode))
+        if kc == 63 { sawFnKeycode = true }
         let raw = event.flags.rawValue
         if let a = active {
             if a.modifierOnly {
@@ -228,7 +234,30 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     default:
         break
     }
-    return Unmanaged.passUnretained(event)
+    return true
+}
+
+/// 🌐 键报为 179 号键时：按下即 fn 按下，松开即 fn 松开（这类 Mac 收不到 63 号事件）
+func handleGlobe(_ isDown: Bool, _ flags: CGEventFlags) {
+    if sawFnKeycode { return }
+    guard let fnRule = rules.first(where: { $0.modifierOnly && $0.trigger == 63 }) else { return }
+    if isDown {
+        guard active == nil, flags.intersection(comparedFlags).isEmpty else { return }
+        emit(fnRule.name, "down")
+        active = fnRule
+    } else if let a = active, a.name == fnRule.name {
+        emit(a.name, "up")
+        active = nil
+    }
+}
+
+let callback: CGEventTapCallBack = { _, type, event, _ in
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        // 系统在回调超时/安全输入时会禁用 tap；必须重新启用，否则快捷键会“失灵”
+        if let t = gTap { CGEvent.tapEnable(tap: t, enable: true) }
+        return Unmanaged.passUnretained(event)
+    }
+    return handleEvent(type, event) ? Unmanaged.passUnretained(event) : nil
 }
 
 /// 修饰键 keycode → 其通用（不分左右）标志位
@@ -240,6 +269,43 @@ func flagFor(_ kc: UInt64) -> UInt64 {
     case 59, 62: return CGEventFlags.maskControl.rawValue
     default: return 0
     }
+}
+
+if replayMode {
+    // 修饰键：键码 → 按下时加上的标志（通用标志 + 区分左右的设备位；fn 为 SecondaryFn）
+    var held = Set<UInt64>()
+    func currentFlags() -> CGEventFlags {
+        var raw: UInt64 = 0
+        for kc in held {
+            raw |= flagFor(kc) | (modifierDeviceMask[kc] ?? 0)
+        }
+        return CGEventFlags(rawValue: raw)
+    }
+    while let line = readLine() {
+        let parts = line.split(separator: " ").map(String.init)
+        guard parts.count == 2, parts[1] == "down" || parts[1] == "up" else { continue }
+        let name = parts[0].lowercased()
+        guard let kc = name == "globe" ? globeKeycode : keyTable[name] else {
+            FileHandle.standardError.write("unknown key: \(name)\n".data(using: .utf8)!)
+            exit(2)
+        }
+        let isDown = parts[1] == "down"
+        let isModifier = modifierDeviceMask[kc] != nil
+        if isModifier { if isDown { held.insert(kc) } else { held.remove(kc) } }
+        guard let ev = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kc), keyDown: isDown) else { exit(4) }
+        let type: CGEventType = isModifier ? .flagsChanged : (isDown ? .keyDown : .keyUp)
+        ev.type = type
+        ev.flags = currentFlags()
+        if !handleEvent(type, ev) {
+            FileHandle.standardOutput.write("{\"swallowed\":\"\(line)\"}\n".data(using: .utf8)!)
+        }
+    }
+    exit(0)
+}
+
+if !AXIsProcessTrusted() {
+    FileHandle.standardError.write("accessibility not granted\n".data(using: .utf8)!)
+    exit(3)
 }
 
 guard let tap = CGEvent.tapCreate(tap: .cghidEventTap,
