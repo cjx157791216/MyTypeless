@@ -23,6 +23,8 @@
 - stdout 每行一个 JSON 事件：`{"name":"system","phase":"ready"}`（tap 就绪）；`{"name":<绑定名>,"phase":"down"|"up"|"abort"}`。
 - `abort` 只用于单修饰键触发（如 `fn`）：按住期间按了其他键。若该键与 fn 组成另一条注册组合（`fn+space` 的空格、`fn+shift` 的 Shift），先发当前绑定的 `abort`、再发那条组合的 `down`，组合键被吞掉；否则只发 `abort`，按键照常传给系统（如 Fn+方向键）。
 - 命中的触发键被吞掉（包括按住时的自动重复）；单修饰键事件不吞。
+- macOS 的 🌐 键：多数 Mac 报为 63 号键（`flagsChanged` + SecondaryFn），有的报为 179 号键的 `keyDown` / `keyUp`，也有两种都报的：179 号键同样触发 `key: "fn"` 的绑定（按下 `down`、松开 `up`），这台 Mac 报过 63 号事件后忽略 179（同一次按键只算一次）；179 不吞，也不会让按住的 Fn 被当成组合误触而 `abort`（D-043）。
+- 测试：`mt-hotkey '<json>' --replay` 不建 tap、不需要权限，从 stdin 逐行读 `<键名> down|up`，输出同样的事件，被吞的按键另输出 `{"swallowed":"<行>"}`。macOS 的键名同 `key`，另有 `globe`（179 号键），按真实键盘造出 `flagsChanged` / `keyDown` / `keyUp`（修饰键标志按当前按住的键计算），用例在 `test/native-mac.test.ts`；Windows 的格式与额外的 `tick` 见下方 Windows 版说明。
 - 父进程退出后 0.4 秒内自行退出。主进程侧：异常退出时退避重启至多 5 次；退出码 3 时转为 `globalShortcut` 兜底，并每 4 秒重试。
 
 ## mt-inject（一次性）

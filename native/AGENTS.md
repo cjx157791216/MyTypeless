@@ -25,7 +25,8 @@
 ## 不变量
 
 - 键盘监听只匹配已注册的快捷键，不记录、不输出其他按键（D-002）。
-- 事件回调里必须处理 `tapDisabledByTimeout` / `tapDisabledByUserInput` 并重新启用 tap。
+- 事件回调里必须处理 `tapDisabledByTimeout` / `tapDisabledByUserInput` 并重新启用 tap。`mt-hotkey` 的按键处理只写在 `handleEvent` 里（真实 tap 与 `--replay` 共用），不要在回调里另写逻辑。
+- 🌐 键可能报为 63 号（`flagsChanged`）或 179 号（`keyDown`/`keyUp`），也可能两者都报（D-043）：新增“按住 Fn 时按了别的键就放弃”一类判断时，先排除 179。
 - 合成键盘事件要显式设置 `flags`（用户可能还按着 Option/Cmd）。
 - 单修饰键触发不吞 `flagsChanged`，避免修饰键状态卡死。
 - 参数先校验（错误一律 `exit(2)`、不发任何按键），再检查权限：无辅助功能权限一律 `exit(3)`；`mt-hotkey` 在父进程退出后自行退出。
@@ -43,7 +44,7 @@
 
 ## 测试
 
-`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。两个平台共同的协议与退出码在 `test/native-helpers.test.ts`（`npm run test`，助手未编译时跳过；只测不发按键、不读输入框的路径）；Windows 独有的部分（`mt-hotkey --replay`、`mt-whisper`、`mt-audiotap` 输出）在 `test/native-win.test.ts`，需先 `npm run native:win`。快捷键与写入需要辅助功能权限，只能真机验证。Windows 端到端测试只能对自建窗口操作（脚本发按键前核对前台进程与窗口标题），不能用记事本等真实应用（Windows 11 记事本会恢复用户未关闭的标签页）。
+`npm run native`（`swiftc` 编译 Swift 助手）；`npm run whisper`（编译 `mt-whisper`，需要 cmake，已编译同版本会跳过）；`npm run diarize`（编译 `mt-diarize`，首次下载 sherpa-onnx 预编译包）；冒烟：`native/bin/mt-focus` 应输出 JSON，`echo 會議 | native/bin/mt-text --to hans` 应输出“会议”，`native/bin/mt-audiotap --list` 应输出进程 JSON 数组（截到真实声音需要「系统音频录制」授权，归属启动它的 app；命令行里归属终端，未授权只给静音）。两个平台共同的协议与退出码在 `test/native-helpers.test.ts`（`npm run test`，助手未编译时跳过；只测不发按键、不读输入框的路径）；`mt-hotkey` 的按键状态机用 `--replay` 测：macOS 在 `test/native-mac.test.ts`（需先 `npm run native`），Windows 在 `test/native-win.test.ts`（另含 `mt-whisper`、`mt-audiotap` 输出，需先 `npm run native:win`）。快捷键与写入需要辅助功能权限，只能真机验证。Windows 端到端测试只能对自建窗口操作（脚本发按键前核对前台进程与窗口标题），不能用记事本等真实应用（Windows 11 记事本会恢复用户未关闭的标签页）。
 
 ## 必读
 

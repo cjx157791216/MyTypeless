@@ -410,6 +410,11 @@ function onSessionProgress(p: SessionProgress): void {
   if (p.errorCode === 'LOCAL_MODEL_MISSING') showHub('#home')
   if (hideTimer) clearTimeout(hideTimer)
   hideTimer = null
+  if (p.state === 'idle' && openKeyboardSettingsWhenIdle) {
+    openKeyboardSettingsWhenIdle = false
+    keyboardSettingsShown = true
+    setTimeout(openKeyboardSettings, 600)
+  }
   if (p.state === 'idle') {
     hideTimer = setTimeout(() => {
       if (!session.isBusy() && meetingLive.state === 'idle') floatingBar?.hide()
@@ -461,20 +466,41 @@ function permissionHost(): string | undefined {
   return permissionHostCache
 }
 
+const usesFnKey = (combo: string | undefined) => /(^|\+)fn(\+|$)/i.test(combo ?? '')
+let fnUsageCache: { at: number; conflict: boolean } | null = null
+
 /**
- * 主键含 Fn 时，系统「按下 🌐 键时」若不是「无操作」，松开 Fn 会弹表情面板 / 切换输入法。
+ * 系统「按下 🌐 键时」不是「无操作」：松开 Fn 会弹表情面板 / 切换输入法（系统在事件监听之下处理，拦不住）。
  * AppleFnUsageType：0 无操作，1 切换输入法，2 表情与符号，3 开始听写；未设置 = 系统默认（非无操作）。
+ * 开始录音时也要查：缓存 30 秒，避免每次按键都起一个 defaults 进程。
  */
+function fnUsageConflict(fresh = false): boolean {
+  if (!isMac) return false
+  if (!fresh && fnUsageCache && Date.now() - fnUsageCache.at < 30_000) return fnUsageCache.conflict
+  let conflict = true
+  try {
+    conflict = execFileSync('defaults', ['read', 'com.apple.HIToolbox', 'AppleFnUsageType'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() !== '0'
+  } catch {
+    /* 未设置：系统默认不是无操作 */
+  }
+  fnUsageCache = { at: Date.now(), conflict }
+  return conflict
+}
+
+/** 主键含 Fn 且系统设置会让松开 Fn 弹表情面板（主窗口首页提示） */
 function fnKeyConflict(): boolean {
   if (!isMac) return false
   const s = loadSettings()
-  const usesFn = [s.bindings?.dictation, s.bindings?.ask, s.bindings?.translate, s.bindings?.rewrite].some((c) => /(^|\+)fn(\+|$)/i.test(c ?? ''))
-  if (!usesFn) return false
-  try {
-    return execFileSync('defaults', ['read', 'com.apple.HIToolbox', 'AppleFnUsageType'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() !== '0'
-  } catch {
-    return true
-  }
+  if (![s.bindings?.dictation, s.bindings?.ask, s.bindings?.translate, s.bindings?.rewrite].some(usesFnKey)) return false
+  return fnUsageConflict(true)
+}
+
+const FN_USAGE_NOTICE = '松开 Fn 会弹表情面板：请在键盘设置里把「按下 🌐 键时」改为「无操作」，写完后为你打开'
+let keyboardSettingsShown = false // 每次启动最多自动打开一次键盘设置
+let openKeyboardSettingsWhenIdle = false
+
+function openKeyboardSettings(): void {
+  if (isMac) void shell.openExternal('x-apple.systempreferences:com.apple.Keyboard-Settings.extension')
 }
 
 async function permissionStatus(): Promise<PermissionStatus> {
@@ -684,9 +710,7 @@ function registerIpc(): void {
     await openAccessibilitySettings()
     return ok
   })
-  ipcMain.handle(IPC.openKeyboardSettings, () => {
-    if (isMac) void shell.openExternal('x-apple.systempreferences:com.apple.Keyboard-Settings.extension')
-  })
+  ipcMain.handle(IPC.openKeyboardSettings, () => openKeyboardSettings())
   ipcMain.on(IPC.barInteractive, (_e, interactive: boolean) => {
     floatingBar?.setIgnoreMouseEvents(!interactive, { forward: true })
     // Windows：记下鼠标进入胶囊时的前台应用，点击把浮动条激活后再还给它（见 createFloatingBar）
@@ -735,6 +759,13 @@ if (!gotLock) {
     if (orphans) devlog('killed orphan engines:', orphans)
     // 会议进行中暂停 Fn 听写（D-015），避免抢麦克风、把听写混进会议记录
     session.setBlocker(() => (meeting.isActive() ? '会议进行中，听写已暂停' : null))
+    // 用 Fn 开始录音、而系统「按下 🌐 键时」不是「无操作」：胶囊上就地提醒，这次听写写完后打开一次键盘设置
+    // （录音中打开会抢走焦点，文字可能写进设置窗口）
+    session.setStartNotice((mode) => {
+      if (!isMac || !usesFnKey(loadSettings().bindings?.[mode]) || !fnUsageConflict()) return null
+      if (!keyboardSettingsShown) openKeyboardSettingsWhenIdle = true
+      return FN_USAGE_NOTICE
+    })
     hotkeys = new HotkeyController(session)
     hotkeys.registerAll()
 

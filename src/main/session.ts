@@ -57,6 +57,7 @@ export class DictationSessionManager {
   private flushWaiter: (() => void) | null = null
   private sink: SessionEventSink = () => {}
   private blocker: () => string | null = () => null
+  private startNotice: (mode: FeatureMode) => string | null = () => null
   lastProgress: SessionProgress = { state: 'idle' }
 
   onProgress(sink: SessionEventSink): void {
@@ -66,6 +67,11 @@ export class DictationSessionManager {
   /** 暂时不允许开始新会话（如会议进行中）：返回提示文字；null = 允许 */
   setBlocker(blocker: () => string | null): void {
     this.blocker = blocker
+  }
+
+  /** 开始录音时在胶囊上给的一次性提示（如 🌐 键的系统设置会让松开 Fn 弹表情面板）；null = 不提示 */
+  setStartNotice(notice: (mode: FeatureMode) => string | null): void {
+    this.startNotice = notice
   }
 
   /** 正在录音（可被停止） */
@@ -145,7 +151,7 @@ export class DictationSessionManager {
     this.showLiveText = settings.showLiveText === true
     this.live = settings.asr.provider === 'builtin' ? this.createLive(gen, settings) : null
     this.maxRecordingMs = settings.maxRecordingMs
-    this.emit({ state: 'recording', elapsedMs: 0, mode, autoStopMs: 0, handsFree: false, keepMicWarm: settings.keepMicWarm, micDeviceId: settings.micDeviceId ?? '', maxRecordingMs: this.maxRecordingMs })
+    this.emit({ state: 'recording', elapsedMs: 0, mode, autoStopMs: 0, handsFree: false, keepMicWarm: settings.keepMicWarm, micDeviceId: settings.micDeviceId ?? '', maxRecordingMs: this.maxRecordingMs, notice: this.startNotice(mode) ?? undefined })
     // 到达最长录音时长：照常结束并写入（浮动条在最后 1 分钟倒计时提醒）
     this.maxTimer = setTimeout(() => {
       this.hitLimit = true

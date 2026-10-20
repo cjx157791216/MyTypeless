@@ -498,7 +498,8 @@ function showError(msg: string, notice = false): void {
   errorEl.classList.toggle('notice', notice)
   errorEl.classList.remove('hidden')
   if (hideToastTimer) clearTimeout(hideToastTimer)
-  hideToastTimer = window.setTimeout(hideError, notice ? 2500 : 3500)
+  // 提示按字数多留一会儿（长提示 2.5 秒读不完）
+  hideToastTimer = window.setTimeout(hideError, notice ? Math.max(2500, msg.length * 80) : 3500)
 }
 function hideError(): void {
   errorEl.classList.add('hidden')
