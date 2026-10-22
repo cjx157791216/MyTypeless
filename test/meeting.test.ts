@@ -1,7 +1,7 @@
 // 会议模式（D-015）：分句、说话人聚类、纪要整理、Markdown 展示
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ALIGN_TOLERANCE, DENOISE_MAX_LAG, MEETING_VAD, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, denoiseLagging, overloaded, planFeed, samplesToMs, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
+import { ALIGN_TOLERANCE, DENOISE_MAX_LAG, MEETING_VAD, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, denoiseLagging, overloaded, planFeed, samplesToMs, snapCuts, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
 import { readFileSync } from 'node:fs'
 import { AUTO_SPEAKERS, OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
 import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown, generateMinutesBody, chunkNotesSystemPrompt, mergeNotesSystemPrompt } from '../src/main/meeting/minutes.ts'
@@ -327,6 +327,25 @@ test('整体归类：同一个命名过的人的句子不会被拆成几个人�
   }
 })
 
+test('整体归类：会中起过名的人组里混进的别人的句子能被纠正出来，名字留在本人那组（已知人数与自动）', () => {
+  // 真实三人会议：给一个人起名时他的组里已混进另一人的句子，之后在线归类又不断归进来；起名的组不能因此锁死
+  const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
+  const A = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[1])
+  const B = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[0])
+  const C = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[2])
+  const set = [...A, ...C, ...B]
+  const items: ClusterItem[] = set.map((x, i) => ({ id: i, speaker: i < A.length + C.length ? 1 : 2, v: x.v, durMs: x.d * 1000, locked: false }))
+  for (const expected of [3, AUTO_SPEAKERS]) {
+    let next = 1000
+    const r = regroup(items, { expected, named: new Set([1]), create: () => next++ })
+    const of = (xs: typeof A, from: number) => xs.map((_, i) => r.assign.get(from + i))
+    assert.ok(of(A, 0).every((s) => s === 1), `人数 ${expected}：名字没有留在本人那组`)
+    const c = of(C, A.length)
+    assert.ok(c.every((s) => s === c[0] && s !== 1 && s !== 2), `人数 ${expected}：混进的句子没有分出来 ${c}`)
+    assert.ok(of(B, A.length + C.length).every((s) => s === 2))
+  }
+})
+
 test('自动人数：只说两句的组不单算一个人；用户命名过的说话人句子再少也保留', () => {
   const spks = [...new Set(shortTurns.map((x) => x.spk))].sort()
   const A = shortTurns.filter((x) => x.ch === 'clean' && x.spk === spks[1])
@@ -447,6 +466,23 @@ test('降噪后分句参数：远处小声的句子能分出来，纯底噪不�
   assert.equal(out.length, 2, '两句远处小声的话（RMS 约 140，底噪约 9）都分出来')
   const quiet = feed(new UtteranceSegmenter(MEETING_VAD_DENOISED), [noise(10000, 30)])
   assert.equal(quiet.length, 0, '纯底噪不成句')
+})
+
+test('句内切点挪到附近最安静处：落在字中间的切点移到两人之间的停顿里，不超出范围、单段不动', () => {
+  // 1.2 秒语音 + 0.08 秒停顿 + 1.5 秒语音；按窗口找到的切点落在后一个人开口后 0.15 秒（字中间）
+  const pcm = new Int16Array([...speech(1200), ...silence(80), ...speech(1500)])
+  const at = 5 * SR // 这句话在会议时间线上的起点
+  const gapMid = at + (1240 / 1000) * SR
+  const cut = at + (1430 / 1000) * SR
+  const out = snapCuts([{ start: at, end: cut }, { start: cut, end: at + pcm.length }], pcm, at)
+  assert.ok(Math.abs(out[0].end - gapMid) <= SR * 0.04, `切点 ${(out[0].end - at) / 16}ms`)
+  assert.equal(out[1].start, out[0].end)
+  assert.equal(out[0].start, at)
+  assert.equal(out[1].end, at + pcm.length)
+  // 停顿在挪动范围（0.25 秒）之外：留在范围内
+  const far = snapCuts([{ start: at, end: at + SR * 2 }, { start: at + SR * 2, end: at + pcm.length }], pcm, at)
+  assert.ok(Math.abs(far[0].end - (at + SR * 2)) <= SR * 0.25)
+  assert.deepEqual(snapCuts([{ start: at, end: at + pcm.length }], pcm, at), [{ start: at, end: at + pcm.length }])
 })
 
 test('句内按窗口找换人：归属变化处切开、单个窗口的抖动被平滑、短段并入前一段', () => {

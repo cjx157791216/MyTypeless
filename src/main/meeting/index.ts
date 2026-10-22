@@ -44,6 +44,7 @@ import {
   alignPad,
   planFeed,
   samplesToMs,
+  snapCuts,
   splitByTurns,
   turnsInUtterance,
   type Part,
@@ -786,7 +787,8 @@ export class MeetingManager {
       const sc = new Map(t.clusterer.scores(v, KNOWN_MIN_SEGMENTS).map((x) => [x.key, x.sim]))
       return { center, scores: keys.map((k) => sc.get(k) ?? -1) }
     })
-    return splitByWindows(u.start, u.end, wins, (SAMPLE_RATE * WINDOW_MIN_PART_MS) / 1000)
+    // 切点挪到附近最安静处：窗口间隔 0.5 秒，原切点常落在字中间（合成接话实测：两人间有短停顿时切开后的错字率 1.9% → 0.7%）
+    return snapCuts(splitByWindows(u.start, u.end, wins, (SAMPLE_RATE * WINDOW_MIN_PART_MS) / 1000), u.pcm, u.start)
   }
 
   /** 在线归类（名字由定期整体归类时按声纹库认出，见 applyRegroup） */
@@ -923,7 +925,7 @@ export class MeetingManager {
     live: Track | null
   ): Map<number, Float32Array> & { changed?: boolean } {
     const segs = store.listSegments(meetingId).filter((s) => s.track === track)
-    // 用户起过名的人是约束（不被并掉、句子不挪走）；声纹自动认出的名字不算——让整体归类能纠正，名字随后复核（D-042）
+    // 用户起过名的人不被并掉（名字跟着他大多数句子走，混进来的别人的句子照常挪走，见 regroup）；声纹自动认出的名字不算——名字随后复核（D-042）
     const named = new Set(store.listSpeakers(meetingId).filter((s) => s.name && !s.auto_named && s.track === track).map((s) => s.id))
     const items: ClusterItem[] = segs.map((s) => ({
       id: s.id,

@@ -282,10 +282,18 @@ function weakestPair(
  * （最近邻链算法，O(n²)，4 小时会议也只需零点几秒），切成细分组后反复合并最分不开的两组——
  * 已知人数 k 时合并到 k 组，人数为 AUTO_SPEAKERS 时合并到两两都分得开并复检（D-042）；之后每段重新归到平均最像的一组（迭代 3 次）。
  * 没有人数（较早的会议）时不重新聚类，只按现有归属计算每人的平均向量。
- * 约束：锁定（用户手动指定）的段、用户命名过的不同说话人不会被并到一起。
+ * 约束：锁定（用户手动指定）的段不动；用户命名过的人不会被并掉——名字跟着这个人大多数句子所在的组走，组里别人的句子照常挪走
+ * （软约束）；软约束下有命名过的人分不到组（被并进了别人）时，才把命名过的人的句子全部当作约束重做（硬约束）。
+ * 硬约束会把命名那一刻组里混进的别人的句子、以及之后在线归到这个名字下的句子一起锁死，越积越多：真实三人会议里会中给一个人起名后，
+ * 另一人的 36 句全部并进了他，第三组只剩 4 句。
  * 结果映射回已有的说话人编号（尽量保持编号与名字不变），多出来的人用 create 新建。
  */
 export function regroup(items: ClusterItem[], opts: { expected: number | null; named?: Set<number>; create: () => number }): RegroupResult {
+  return regroupWith(items, opts, false) ?? regroupWith(items, opts, true)!
+}
+
+/** hardNamed = 命名过的人的句子都作为约束；软约束下有命名过的人分不到组时返回 null（此时还没有调用 create） */
+function regroupWith(items: ClusterItem[], opts: { expected: number | null; named?: Set<number>; create: () => number }, hardNamed: boolean): RegroupResult | null {
   const named = opts.named ?? new Set<number>()
   const usable = items.filter((it) => it.v && it.durMs >= MIN_EMBED_MS && it.speaker !== null)
   const n = usable.length
@@ -299,8 +307,8 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
   }
   const dim = usable[0].v!.length
   const vecs = usable.map((it) => normalize(it.v!))
-  // 约束标签：锁定段 → 锁定的说话人；命名说话人的段 → 该说话人；两簇标签不同不能合并
-  const tag = usable.map((it) => (it.locked || named.has(it.speaker!) ? it.speaker! : null))
+  // 约束标签：锁定段 → 锁定的说话人；硬约束时命名说话人的段 → 该说话人；两簇标签不同不能合并
+  const tag = usable.map((it) => (it.locked || (hardNamed && named.has(it.speaker!)) ? it.speaker! : null))
 
   // 簇间相似度之和 S[a][b] = Σ_{i∈a, j∈b} u_i·u_j；平均相似度 = S / (|a||b|)
   const S = new Float64Array(n * n)
@@ -488,6 +496,25 @@ export function regroup(items: ClusterItem[], opts: { expected: number | null; n
       speakerOf.set(ms, t)
       used.add(t)
     }
+  }
+  if (!hardNamed && named.size) {
+    // 软约束：命名过的人按句数从多到少各认领一组（名字跟着自己大多数句子走），只认领自己句子最多的组（不把名字安到别人的组上）；
+    // 有人一组也认领不到（被并进了别人）就改用硬约束重做
+    const pairs: Array<{ ms: number[]; sp: number; c: number }> = []
+    for (const ms of clusterList) {
+      if (speakerOf.has(ms)) continue
+      const votes = new Map<number, number>()
+      for (const i of ms) votes.set(usable[i].speaker!, (votes.get(usable[i].speaker!) ?? 0) + 1)
+      const top = Math.max(...votes.values())
+      for (const [sp, c] of votes) if (named.has(sp) && c === top) pairs.push({ ms, sp, c })
+    }
+    pairs.sort((x, y) => y.c - x.c)
+    for (const { ms, sp } of pairs) {
+      if (speakerOf.has(ms) || used.has(sp)) continue
+      speakerOf.set(ms, sp)
+      used.add(sp)
+    }
+    if (usable.some((it) => named.has(it.speaker!) && !used.has(it.speaker!))) return null
   }
   for (const ms of clusterList) {
     if (speakerOf.has(ms)) continue

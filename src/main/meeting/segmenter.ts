@@ -244,6 +244,39 @@ export function splitByTurns(start: number, end: number, turns: Array<[number, n
   return bounds.slice(0, -1).map((a, i) => ({ start: a, end: bounds[i + 1] }))
 }
 
+const SNAP_FRAME = SAMPLE_RATE / 100 // 10ms
+export const SNAP_RADIUS_MS = 250 // 窗口每 0.5 秒一个，切点与真正换人处最多差半个间隔
+
+/**
+ * 句内切点挪到前后 radiusMs 内最安静的 10ms 处（pcm 是这句话的录音，从时间线 start 开始）：按窗口找到的切点只精确到 0.5 秒，
+ * 常落在字中间，切开的字两边都认不错；能量相同时取离原切点最近的。挪动后每段仍不短于原来最短一段的一半。
+ */
+export function snapCuts(parts: Part[], pcm: Int16Array, start: number, radiusMs = SNAP_RADIUS_MS): Part[] {
+  if (parts.length < 2) return parts
+  const radius = (radiusMs / 1000) * SAMPLE_RATE
+  const minLen = Math.min(...parts.map((p) => p.end - p.start)) / 2
+  const out = parts.map((p) => ({ ...p }))
+  for (let i = 0; i < out.length - 1; i++) {
+    const cut = out[i].end
+    const lo = Math.max(cut - radius, out[i].start + minLen) - start
+    const hi = Math.min(cut + radius, out[i + 1].end - minLen) - start
+    let best = cut
+    let bestE = Infinity
+    for (let f = Math.max(0, Math.ceil(lo / SNAP_FRAME) * SNAP_FRAME); f + SNAP_FRAME <= Math.min(hi, pcm.length); f += SNAP_FRAME) {
+      let e = 0
+      for (let j = f; j < f + SNAP_FRAME; j++) e += pcm[j] * pcm[j]
+      const at = start + f + SNAP_FRAME / 2
+      if (e < bestE || (e === bestE && Math.abs(at - cut) < Math.abs(best - cut))) {
+        bestE = e
+        best = at
+      }
+    }
+    out[i].end = best
+    out[i + 1].start = best
+  }
+  return out
+}
+
 /**
  * 句内换人检测时带上句子前面的一段录音做参考（分段模型在几秒的短片段里分不清人）：
  * 把对 [ctxStart, end) 检测出的轮次换算成相对句子开头的位置，只保留与句子重叠的部分。
