@@ -27,7 +27,7 @@ test('录音文件名：日期在前，去掉文件名里不能用的字符；�
 })
 
 test('同名文件已存在时加序号，不覆盖', () => {
-  const taken = new Set(['/d/a.wav', '/d/a (2).wav'])
+  const taken = new Set([join('/d', 'a.wav'), join('/d', 'a (2).wav')])
   assert.equal(uniquePath('/d', 'a.wav', (p) => taken.has(p)), join('/d', 'a (3).wav'))
   assert.equal(uniquePath('/d', 'b.wav', (p) => taken.has(p)), join('/d', 'b.wav'))
 })
