@@ -31,6 +31,26 @@ const BANDS = 16
 const BAND_EDGES = Array.from({ length: BANDS + 1 }, (_, i) => Math.round((150 * (7000 / 150) ** (i / BANDS) * NFFT) / SAMPLE_RATE))
 const HANN = Float32Array.from({ length: FRAME }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (FRAME - 1)))
 
+/**
+ * 各级蝶形运算的旋转因子：模块加载时按 NFFT 算好一次（与逐次 Math.cos / Math.sin 的结果逐位相同）。
+ * 每句话两路都要做几百次 FFT，且在主进程里同步执行：逐次计算三角函数时一句约 0.3～0.5 秒卡住主进程（慢 CPU 实测）
+ */
+const TWIDDLES = (() => {
+  const out: Array<{ cos: Float64Array; sin: Float64Array }> = []
+  for (let len = 2; len <= NFFT; len <<= 1) {
+    const ang = (-2 * Math.PI) / len
+    const half = len >> 1
+    const cos = new Float64Array(half)
+    const sin = new Float64Array(half)
+    for (let k = 0; k < half; k++) {
+      cos[k] = Math.cos(ang * k)
+      sin[k] = Math.sin(ang * k)
+    }
+    out.push({ cos, sin })
+  }
+  return out
+})()
+
 /** 原地基 2 FFT（re、im 长度为 NFFT） */
 function fft(re: Float32Array, im: Float32Array): void {
   const n = re.length
@@ -39,22 +59,29 @@ function fft(re: Float32Array, im: Float32Array): void {
     for (; j & bit; bit >>= 1) j ^= bit
     j ^= bit
     if (i < j) {
-      ;[re[i], re[j]] = [re[j], re[i]]
-      ;[im[i], im[j]] = [im[j], im[i]]
+      let t = re[i]
+      re[i] = re[j]
+      re[j] = t
+      t = im[i]
+      im[i] = im[j]
+      im[j] = t
     }
   }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = (-2 * Math.PI) / len
+  for (let len = 2, level = 0; len <= n; len <<= 1, level++) {
+    const half = len >> 1
+    const { cos, sin } = TWIDDLES[level]
     for (let i = 0; i < n; i += len) {
-      for (let k = 0; k < len / 2; k++) {
-        const wr = Math.cos(ang * k)
-        const wi = Math.sin(ang * k)
-        const ar = re[i + k + len / 2] * wr - im[i + k + len / 2] * wi
-        const ai = re[i + k + len / 2] * wi + im[i + k + len / 2] * wr
-        re[i + k + len / 2] = re[i + k] - ar
-        im[i + k + len / 2] = im[i + k] - ai
-        re[i + k] += ar
-        im[i + k] += ai
+      for (let k = 0; k < half; k++) {
+        const p = i + k
+        const q = p + half
+        const wr = cos[k]
+        const wi = sin[k]
+        const ar = re[q] * wr - im[q] * wi
+        const ai = re[q] * wi + im[q] * wr
+        re[q] = re[p] - ar
+        im[q] = im[p] - ai
+        re[p] += ar
+        im[p] += ai
       }
     }
   }
