@@ -34,6 +34,7 @@ import { AppAudioCapture, appAudioSupported, appAudioUnsupportedHint, prepareApp
 import { denoiser, diarizer, speakerModel } from './diarizer'
 import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
+import { recordingFileName, saveRecording, uniquePath } from './recording'
 import { buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
 import {
   MEETING_VAD,
@@ -813,8 +814,9 @@ export class MeetingManager {
     }
   }
 
-  /** 整理：整场重新归类说话人 →（可选）生成纪要 → 删除临时录音 */
+  /** 整理：（开启时）保存会议录音 → 整场重新归类说话人 →（可选）生成纪要 → 删除临时录音 */
   private async organize(meetingId: string, embeddings: Map<number, Float32Array>, prints: Active['prints'], withMinutes: boolean): Promise<void> {
+    await this.keepRecording(meetingId)
     this.processing = { id: meetingId, stage: '正在整理说话人…' }
     this.emit()
     try {
@@ -835,6 +837,41 @@ export class MeetingManager {
     this.processing = null
     this.emit()
     this.hooks.onChanged(meetingId)
+  }
+
+  /**
+   * 保存会议录音（D-044）：设置里开启时，把临时录音写成一个 WAV（两路混成一路）放到用户选的文件夹；
+   * 文件夹不可写（移动硬盘拔掉、被删除）时存到应用数据目录的 saved-recordings 并提示。最先做，免得纪要失败或退出时录音已被删掉。
+   */
+  private async keepRecording(meetingId: string): Promise<void> {
+    const settings = loadSettings()
+    const row = store.getMeetingRow(meetingId)
+    if (!settings.meetingSaveAudio || !row || row.saved_audio_path) return
+    const paths = store.trackPaths(row).flatMap(([, p]) => (p && existsSync(p) ? [p] : []))
+    if (!paths.length) return
+    this.processing = { id: meetingId, stage: '正在保存会议录音…' }
+    this.emit()
+    const file = recordingFileName(row.title, row.started_at)
+    const fallback = join(app.getPath('userData'), 'saved-recordings')
+    const dirs = [...new Set([settings.meetingAudioDir.trim() || fallback, fallback])]
+    for (const dir of dirs) {
+      try {
+        const dest = uniquePath(dir, file)
+        await saveRecording(paths, dest)
+        store.updateMeeting(meetingId, { savedAudioPath: dest })
+        if (dir !== dirs[0]) this.flash(`会议录音没能存到「${dirs[0]}」，已存到应用数据目录：在会议详情里点「显示录音」可以找到`, 20_000)
+        return
+      } catch (err) {
+        console.warn('[meeting] save recording failed:', dir, err)
+      }
+    }
+    this.flash('会议录音没能保存（磁盘空间不足或没有写入权限），转写不受影响', 20_000)
+  }
+
+  /** 这场会议保存下来的录音路径（D-044）；没保存、或文件已被移走删除时为 null */
+  savedRecording(meetingId: string): string | null {
+    const path = store.getMeetingRow(meetingId)?.saved_audio_path
+    return path && existsSync(path) ? path : null
   }
 
   private async reclusterMeeting(meetingId: string, embeddings: Map<number, Float32Array>, prints: Active['prints']): Promise<void> {

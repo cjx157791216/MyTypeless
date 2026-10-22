@@ -220,6 +220,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 }
 .save-error { background: var(--danger) !important; border-color: var(--danger) !important; }
 .voiceprint-list { display: flex; flex-direction: column; gap: 6px; }
+.audio-dir { font-size: 12.5px; color: var(--muted); word-break: break-all; }
 .style-head { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
 .style-sample-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
 .style-sample-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 8px; font-size: 12px; }

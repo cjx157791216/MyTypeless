@@ -100,6 +100,8 @@ export interface Settings {
   meetingSource: MeetingSource // 上次开会选的声音来源（D-033）
   meetingApp: string // 上次截取声音的应用 bundleId；空 = 全部系统声音
   meetingRemoteSpeakers: number // 上次选的线上人数（应用声音里有几个人；AUTO_SPEAKERS = 自动）
+  meetingSaveAudio: boolean // 保存会议录音（D-044）：整理时把录音存成 WAV 放到 meetingAudioDir；默认关（只临时保存、整理完删除，D-016）
+  meetingAudioDir: string // 会议录音保存到哪个文件夹（用户勾选时选定）；空或不可写时存到应用数据目录的 saved-recordings
   autoCheckUpdates: boolean // 启动后与每 6 小时检查一次新版本（只读发布地址的版本说明，D-028）
 }
 
@@ -188,6 +190,7 @@ export interface MeetingDetail extends MeetingSummary {
   segments: MeetingSegment[]
   minutes: string | null // Markdown
   minutesError: string | null
+  savedAudioPath: string | null // 保存下来的会议录音（D-044）；没保存为 null。文件由用户管理，删除会议时不删
 }
 
 /** 当前会议的实时状态（main → 浮动条/主窗口） */
@@ -343,6 +346,8 @@ export const IPC = {
   meetingPrepareAppAudio: 'mt:meeting-prepare-app-audio', // → 'ready' | 'waiting' | 'unsupported'：开会前先完成「录制系统音频」授权
   meetingFinish: 'mt:meeting-finish', // 整理异常中断的会议（id, { minutes?: boolean }）
   meetingExport: 'mt:meeting-export', // 导出 Markdown（保存对话框）
+  meetingAudioDir: 'mt:meeting-audio-dir', // ('pick' | 'open')：选择会议录音的保存文件夹（返回选定的路径，取消为 null）/ 打开该文件夹（D-044）
+  meetingRevealAudio: 'mt:meeting-reveal-audio', // (id) → boolean：在文件管理器里显示这场会议保存的录音；文件已不在时为 false
   voiceprintList: 'mt:voiceprint-list',
   voiceprintRename: 'mt:voiceprint-rename',
   voiceprintDelete: 'mt:voiceprint-delete',

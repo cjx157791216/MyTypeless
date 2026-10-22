@@ -68,6 +68,7 @@
 | 分得开 | `SEPARATE_RATIO`、`SEPARATE_SE`、`MIN_GROUP`、`MINOR_SHARE`、`MINOR_RATIO` | 两组声音是不是两个人：组间平均相似度加抽样误差低于较散一组组内相似度的 0.8 倍；不到 3 句、或占比不到 5% 又与大组不够远的小组不单算一个人 | D-042 |
 | 会议纪要 | `minutes` | 会后由 LLM 生成的 Markdown：头部本地生成，正文五节 | D-015 |
 | 临时录音 | `meetings.audio_path`（`userData/meetings/*.pcm`） | 会议期间保存在本机的录音，整理完删除 | D-016 |
+| 保存的会议录音 | `meetingSaveAudio`、`meetingAudioDir`、`meetings.saved_audio_path`、`recording.ts` 的 `saveRecording` | 用户开启后，整理时另存到用户所选文件夹的 WAV（两路混成一个）；由用户管理，删除会议不删 | D-044 |
 | 应用声音 | `mt-audiotap`、`AppAudioCapture`、`meetings.app_audio_path` | 会议软件等其他应用播放出来的声音（线上会议里对方的声音），由 Core Audio process tap 截取，会议期间临时保存在本机 | D-033 |
 | 声音来源 | `MeetingSource`（`mic` / `mixed` / `app`）、`meetingSource` | 会议录哪里的声音：只用麦克风 / 麦克风 + 会议软件 / 只用会议软件的声音 | D-033 |
 | 现场 / 线上（一路） | `MeetingTrack`（0 / 1）、`track` 列 | 会议录音的一路：麦克风为现场，应用声音为线上；每一路各自区分说话人、各有人数（线上人数 `expected_remote`） | D-033 |

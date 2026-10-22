@@ -1,5 +1,5 @@
 import type { AsrProviderConfig, MeetingLive, ModelInfo, ModelProgress, Settings, StyleSample } from '../../shared/types'
-import { $, api } from './util'
+import { $, api, toast } from './util'
 import { defaultBindings } from '../../shared/platform'
 
 // 设置页：识别/润色配置、模型下载、快捷键、麦克风；首页的模型横幅与权限状态也在这里维护
@@ -55,6 +55,7 @@ export async function loadSettingsIntoUi(): Promise<void> {
   ;($('learn-style') as HTMLInputElement).checked = s.learnStyle === true
   ;($('style-note') as HTMLTextAreaElement).value = s.styleNote ?? ''
   ;($('auto-update') as HTMLInputElement).checked = s.autoCheckUpdates !== false
+  renderMeetingAudio(s)
   await loadMicDevices(s.micDeviceId ?? '')
   ;($('asr-key-state') as HTMLElement).textContent = s.asr.hasApiKey ? `已配置（${s.asr.apiKeyMasked}）` : '未配置'
   ;($('llm-key-state') as HTMLElement).textContent = s.llm.hasApiKey ? `已配置（${s.llm.apiKeyMasked}）` : '未配置'
@@ -442,6 +443,37 @@ consentToggle('learn-style', 'learnStyle', () =>
 )
 $('style-note').addEventListener('change', async () => {
   savedSettings = await api.settings.set({ styleNote: ($('style-note') as HTMLTextAreaElement).value.trim() })
+})
+
+// —— 保存会议录音（D-044）：勾选时先选文件夹，取消选择就不开启 ——
+function renderMeetingAudio(s: Settings): void {
+  const on = s.meetingSaveAudio === true
+  ;($('meeting-save-audio') as HTMLInputElement).checked = on
+  $('meeting-audio-dir-row').classList.toggle('hidden', !on)
+  $('meeting-audio-dir').textContent = s.meetingAudioDir ? `保存到：${s.meetingAudioDir}` : '保存到：应用数据目录（请点「更改…」选一个文件夹）'
+  $('meeting-audio-dir').title = s.meetingAudioDir
+}
+
+async function pickMeetingAudioDir(): Promise<string | null> {
+  const dir = await api.meeting.audioDir('pick')
+  savedSettings = await api.settings.get()
+  return dir
+}
+
+$('meeting-save-audio').addEventListener('change', async () => {
+  const el = $('meeting-save-audio') as HTMLInputElement
+  if (el.checked && !(await pickMeetingAudioDir())) {
+    el.checked = false
+    return
+  }
+  savedSettings = await api.settings.set({ meetingSaveAudio: el.checked })
+  renderMeetingAudio(savedSettings)
+})
+$('btn-meeting-audio-dir').addEventListener('click', async () => {
+  if (await pickMeetingAudioDir()) renderMeetingAudio(savedSettings!)
+})
+$('btn-meeting-audio-open').addEventListener('click', async () => {
+  if (!(await api.meeting.audioDir('open'))) toast('找不到保存的文件夹，请点「更改…」重新选择')
 })
 
 export async function loadStyleSamples(): Promise<void> {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Tray, Menu, nativeImage, nativeTheme, screen, shell, systemPreferences } from 'electron'
 import { execFile, execFileSync } from 'child_process'
-import { appendFileSync, writeFileSync } from 'fs'
+import { appendFileSync, existsSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { IPC, type SessionProgress, type Settings, type FeatureMode, type MeetingLive, type MeetingStartOptions, type MeetingTrack } from '../shared/types'
@@ -667,6 +667,31 @@ function registerIpc(): void {
     if (res.canceled || !res.filePath) return false
     writeFileSync(res.filePath, exportMarkdown(d.minutes, transcript), 'utf-8')
     return true
+  })
+  // 保存会议录音（D-044）：选文件夹 / 打开文件夹 / 显示某场会议的录音
+  ipcMain.handle(IPC.meetingAudioDir, async (e, action: 'pick' | 'open') => {
+    const current = loadSettings().meetingAudioDir
+    if (action === 'open') {
+      if (!current || !existsSync(current)) return null
+      await shell.openPath(current)
+      return current
+    }
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择会议录音的保存位置',
+      buttonLabel: '保存到这里',
+      defaultPath: current && existsSync(current) ? current : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const res = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts)
+    const dir = res.canceled ? null : (res.filePaths[0] ?? null)
+    if (dir) saveSettings({ meetingAudioDir: dir })
+    return dir
+  })
+  ipcMain.handle(IPC.meetingRevealAudio, (_e, id: string) => {
+    const path = meeting.savedRecording(id)
+    if (path) shell.showItemInFolder(path)
+    return !!path
   })
   ipcMain.handle(IPC.speakerModelAction, (_e, action: 'download' | 'cancel' | 'remove') => meeting.speakerModelAction(action))
   ipcMain.handle(IPC.voiceprintList, () => meetingStore.listVoiceprints())

@@ -6,7 +6,8 @@ import { EMBED_MODEL } from './cluster'
 
 /**
  * 会议存储（D-015、D-016）：会议、说话人（含每人一个声音特征向量）、按句的转写、已保存的声纹。
- * 表结构见 `history.ts`；录音不进数据库（临时文件路径记在 meetings.audio_path / app_audio_path，整理完删除）。
+ * 表结构见 `history.ts`；录音不进数据库（临时文件路径记在 meetings.audio_path / app_audio_path，整理完删除；
+ * 用户开启保存会议录音时另存的 WAV 路径记在 saved_audio_path，D-044）。
  * 线上会议（D-033）分两路：track 0 = 麦克风（现场），1 = 应用声音（线上）；说话人与句子各属一路，两路各自区分说话人、各自编号。
  */
 
@@ -38,6 +39,7 @@ export interface MeetingRow {
   app_audio_path: string | null // 应用声音的临时录音（D-033）
   app_name: string | null
   expected_remote: number | null // 线上人数
+  saved_audio_path: string | null // 保存下来的会议录音（D-044，用户的文件，删除会议时不删）
 }
 
 export interface SpeakerRow {
@@ -105,6 +107,7 @@ export function updateMeeting(
     minutesError: string | null
     audioPath: string | null
     appAudioPath: string | null
+    savedAudioPath: string | null
   }>
 ): void {
   const cols: Record<string, string> = {
@@ -115,7 +118,8 @@ export function updateMeeting(
     minutes: 'minutes',
     minutesError: 'minutes_error',
     audioPath: 'audio_path',
-    appAudioPath: 'app_audio_path'
+    appAudioPath: 'app_audio_path',
+    savedAudioPath: 'saved_audio_path'
   }
   const keys = Object.keys(patch).filter((k) => k in cols)
   if (!keys.length) return
@@ -209,7 +213,8 @@ export function getMeetingDetail(id: string): MeetingDetail | null {
     speakerList,
     segments: segs,
     minutes: r.minutes,
-    minutesError: r.minutes_error
+    minutesError: r.minutes_error,
+    savedAudioPath: r.saved_audio_path ?? null
   }
 }
 

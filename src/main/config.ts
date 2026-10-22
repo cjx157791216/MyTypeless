@@ -65,6 +65,8 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingSource: 'mic',
   meetingApp: '',
   meetingRemoteSpeakers: 0,
+  meetingSaveAudio: false, // D-044：默认只临时保存录音
+  meetingAudioDir: '',
   autoCheckUpdates: true
 }
 

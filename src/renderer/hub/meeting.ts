@@ -64,6 +64,14 @@ function countValue(sel: HTMLSelectElement): number {
   return Number.isInteger(n) && n >= 0 ? n : AUTO_SPEAKERS
 }
 
+/** 开始会议卡片的说明：开启保存会议录音（D-044）时写明存到哪 */
+async function renderAudioNote(): Promise<void> {
+  const s = await api.settings.get()
+  $('meeting-audio-note').textContent = s.meetingSaveAudio
+    ? `录音结束后保存到「${s.meetingAudioDir || '应用数据目录'}」（设置 → 会议录音）。`
+    : '录音只在本机临时保存，整理完自动删除。'
+}
+
 let startInited = false
 let appsSupported = true
 
@@ -84,6 +92,7 @@ async function loadList(): Promise<void> {
   updateSourceUi()
   void prepareAppAudio()
   renderStartCard()
+  void renderAudioNote()
   const box = $('meeting-interrupted')
   box.innerHTML = ''
   for (const m of meetings.filter((x) => x.status === 'interrupted')) {
@@ -313,6 +322,9 @@ function renderDetail(): void {
   renderBars()
   for (const b of document.querySelectorAll<HTMLButtonElement>('#meeting-tabs button')) b.classList.toggle('active', b.dataset.tab === tab)
   for (const p of document.querySelectorAll<HTMLElement>('#meeting-detail-view .tab-panel')) p.classList.toggle('active', p.dataset.tab === tab)
+  const audio = $('btn-meeting-reveal-audio')
+  audio.classList.toggle('hidden', !d.savedAudioPath)
+  audio.title = d.savedAudioPath ?? ''
   ;($('btn-meeting-delete') as HTMLButtonElement).disabled = isLiveHere() || (live.state === 'processing' && live.meetingId === d.id)
   renderSpeakerBar()
   renderTranscript()
@@ -695,11 +707,15 @@ $('meeting-detail-title').addEventListener('change', () => {
 })
 $('btn-meeting-pause').addEventListener('click', () => void (live.state === 'paused' ? api.meeting.resume() : api.meeting.pause()))
 $('btn-meeting-stop').addEventListener('click', () => endChoice($('btn-meeting-stop'), (minutes) => void api.meeting.stop({ minutes })))
+$('btn-meeting-reveal-audio').addEventListener('click', async () => {
+  if (detail && !(await api.meeting.revealAudio(detail.id))) toast('录音文件已被移走或删除')
+})
 $('btn-meeting-export').addEventListener('click', async () => {
   if (detail && (await api.meeting.exportMarkdown(detail.id))) toast('已导出')
 })
 $('btn-meeting-delete').addEventListener('click', async () => {
-  if (!detail || !confirm(`删除会议「${detail.title}」？文字、说话人和临时录音都会删除，不可恢复。`)) return
+  const kept = detail?.savedAudioPath ? `\n\n保存到文件夹里的录音（${detail.savedAudioPath}）不会删除。` : ''
+  if (!detail || !confirm(`删除会议「${detail.title}」？文字、说话人和临时录音都会删除，不可恢复。${kept}`)) return
   if (await api.meeting.remove(detail.id)) navigate('#meeting')
   else toast('会议进行中或整理中，不能删除')
 })
