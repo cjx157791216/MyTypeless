@@ -88,6 +88,8 @@ const api = {
     audioApps: () => ipcRenderer.invoke(IPC.meetingAudioApps),
     prepareAppAudio: () => ipcRenderer.invoke(IPC.meetingPrepareAppAudio),
     exportMarkdown: (id: string) => ipcRenderer.invoke(IPC.meetingExport, id),
+    audioDir: (action: 'pick' | 'open') => ipcRenderer.invoke(IPC.meetingAudioDir, action),
+    revealAudio: (id: string) => ipcRenderer.invoke(IPC.meetingRevealAudio, id),
     onLive: (cb: (live: unknown) => void) => {
       const listener = (_e: unknown, live: unknown) => cb(live)
       ipcRenderer.on(IPC.meetingLive, listener)

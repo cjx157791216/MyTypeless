@@ -147,6 +147,8 @@ function migrateColumns(): void {
   if (!meetingCols.has('app_audio_path')) d.exec(`ALTER TABLE meetings ADD COLUMN app_audio_path TEXT`)
   if (!meetingCols.has('app_name')) d.exec(`ALTER TABLE meetings ADD COLUMN app_name TEXT`)
   if (!meetingCols.has('expected_remote')) d.exec(`ALTER TABLE meetings ADD COLUMN expected_remote INTEGER`)
+  // 保存下来的会议录音（D-044）：用户选的文件夹里的 WAV，删除会议时不删
+  if (!meetingCols.has('saved_audio_path')) d.exec(`ALTER TABLE meetings ADD COLUMN saved_audio_path TEXT`)
   if (!segCols.has('track')) d.exec(`ALTER TABLE meeting_segments ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
   const speakerCols = new Set((d.prepare(`PRAGMA table_info(meeting_speakers)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!speakerCols.has('track')) d.exec(`ALTER TABLE meeting_speakers ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)

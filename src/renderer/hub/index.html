@@ -180,7 +180,7 @@
                 <select id="meeting-remote" title="会议软件里有几个人说话：选「自动」按声音判断（会中、会后都能再改）"></select>
               </div>
               <div class="hint" id="meeting-source-hint"></div>
-              <div class="hint">选好人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；录音只在本机临时保存，整理完自动删除。会议进行中 <span class="main-key">Fn</span> 听写暂停。</div>
+              <div class="hint">选好人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；<span id="meeting-audio-note">录音只在本机临时保存，整理完自动删除。</span>会议进行中 <span class="main-key">Fn</span> 听写暂停。</div>
               <div class="hint" id="meeting-start-state"></div>
             </div>
             <div id="meeting-list" class="meeting-list"></div>
@@ -200,6 +200,7 @@
                   </div>
                 </div>
                 <div class="row-actions" id="meeting-detail-actions">
+                  <button id="btn-meeting-reveal-audio" class="btn mini hidden">显示录音</button>
                   <button id="btn-meeting-export" class="btn mini">导出 Markdown</button>
                   <button id="btn-meeting-delete" class="btn mini danger">删除</button>
                 </div>
@@ -403,6 +404,22 @@
               <label class="check"><input id="auto-stop" type="checkbox" /> 免手持时静音自动结束（停顿约 1.5 秒）</label>
               <label class="check"><input id="live-preview" type="checkbox" /> 说话时在胶囊上方显示识别中的文字（默认关闭：说话时只显示波形，松手后出结果；停顿时仍在后台识别，松手等待同样很短）</label>
               <label class="check"><input id="keep-mic-warm" type="checkbox" /> 麦克风保持就绪：说完后 60 秒内再开口不丢开头的字（期间菜单栏显示麦克风图标，只在内存里保留最近 0.3 秒，不上传不保存）</label>
+            </div>
+          </div>
+
+          <!-- 保存会议录音（D-044）：默认关；勾选时选文件夹 -->
+          <div class="settings-group" id="settings-meeting-audio">
+            <h2>会议录音</h2>
+            <div class="card">
+              <label class="check"><input id="meeting-save-audio" type="checkbox" /> 保存会议录音：每场会议结束后，把录音存成 WAV 文件放到指定的文件夹</label>
+              <div class="model-head hidden" id="meeting-audio-dir-row">
+                <span class="audio-dir" id="meeting-audio-dir"></span>
+                <span class="actions">
+                  <button id="btn-meeting-audio-dir" class="btn mini">更改…</button>
+                  <button id="btn-meeting-audio-open" class="btn mini">打开</button>
+                </span>
+              </div>
+              <div class="hint">16kHz 单声道，约 115 MB / 小时；线上会议的现场与对方声音混在一个文件里。保存的录音由你自己管理：不会自动删除，在 MyTypeless 里删除会议也不会删掉它。不勾选时录音只在本机临时保存，整理完自动删除。录音前请告知参会者。</div>
             </div>
           </div>
 

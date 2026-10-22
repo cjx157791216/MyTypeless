@@ -13,6 +13,7 @@
 | `call-apps.ts` | 线上会议可选应用分类：通话软件 / 浏览器 / 其他（D-039，纯逻辑） |
 | `app-audio.ts` | 线上会议的应用声音：`mt-audiotap` 进程、应用列表、开会前授权 `prepareAppAudio`（D-033） |
 | `diarizer.ts` | 声纹 / 分段 / 降噪模型下载与 `mt-diarize` 进程 |
+| `recording.ts` | 保存会议录音（D-044）：临时录音按块混成一个 WAV `saveRecording`、文件名 `recordingFileName`（纯逻辑，只用 fs） |
 | `store.ts` | 会议、说话人、句子、声纹的 sqlite 存储 |
 
 纯逻辑模块被 `test/` 导入：不能 import `electron`、不能用 TS 参数属性，互相导入写 `.ts` 扩展名。
@@ -20,7 +21,7 @@
 ## 不变量
 
 - 会议与听写共用浮动条的麦克风管线和内置引擎；会议进行中 `session.setBlocker` 拦下听写。
-- 临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。转写稿用 `wrapMeetingTranscript` 包裹。
+- 临时录音只写 `userData/meetings/`，整理完（`organize`）或删除会议时删除；用户开启保存会议录音时 `organize` 最先调 `keepRecording` 另存到用户的文件夹（`saved_audio_path`，删除会议时不删，D-044）；声纹只在用户勾选“记住这个声音”时保存；发给 LLM 的只有转写文字与说话人名字（D-016）。转写稿用 `wrapMeetingTranscript` 包裹。
 - 两路的说话人不能互相合并或改归属；各路各自分句、区分说话人、算人数；麦克风那一路识别前先 `echoFree` 去掉外放回声。
 - 用应用声音前必须先 `prepareAppAudio`：macOS 用户点「允许」录制系统音频后，系统会**退出并重新打开所有 MyTypeless 实例**（包括隔离测试实例），不能发生在会议中途；没授权时系统只给全零、不报错。
 - 分句：停顿切句后，每句再用分段模型（带前 8 秒参考录音）找句内换人——真人对话常不停顿就接话；分段模型在几秒的短片段里分不清人，必须带参考录音。会议已区分出各人后改用 `splitByWindows`（1.5 秒窗口与各人比较，D-025）；按窗口切的段不要再 `mergeAdjacentParts`（同一声源下不同人也可能 ≥ 0.55，会把切开的又合回）；切点用 `snapCuts` 挪到 ±0.25 秒内最安静处（窗口间隔 0.5 秒，原切点常切在字中间）。

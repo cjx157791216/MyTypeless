@@ -49,6 +49,8 @@
 | `meetingPrepareAppAudio` | `meeting.prepareAppAudio()` | 开会前先完成「录制系统音频」授权 → `'ready' \| 'waiting' \| 'unsupported'`；`waiting` = 系统授权框还没回应（用户允许后 macOS 会退出并重新打开 MyTypeless，所以必须在开会前）（D-033） |
 | `meetingFinish` | `meeting.finish(id, opts?)` | 整理异常中断的会议：补转写临时录音尾部后照常整理 → `{ ok, error? }` |
 | `meetingExport` | `meeting.exportMarkdown(id)` | 保存对话框，写出纪要 + 完整记录的 Markdown → `boolean` |
+| `meetingAudioDir` | `meeting.audioDir(action)` | 会议录音的保存文件夹（D-044）：`pick` 弹出选择框并写入设置 `meetingAudioDir` → 选定的路径，取消为 `null`；`open` 在文件管理器里打开 → 路径，文件夹不存在为 `null` |
+| `meetingRevealAudio` | `meeting.revealAudio(id)` | 在文件管理器里选中这场会议保存的录音 → `boolean`（没保存或文件已不在为 `false`） |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |
 | `voiceprintList` / `voiceprintRename` / `voiceprintDelete` | `voiceprints.list/rename/remove` | → 最新 `Voiceprint[]`；改名同步到关联的说话人，删除立即生效（D-016） |
 | `styleSampleList` / `styleSampleDelete` / `styleSampleClear` | `styleSamples.list/remove/clear` | → 最新 `StyleSample[]`（从新到旧）；删除、清空立即生效（D-041） |
