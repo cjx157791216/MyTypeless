@@ -348,6 +348,7 @@ export const IPC = {
   meetingExport: 'mt:meeting-export', // 导出 Markdown（保存对话框）
   meetingAudioDir: 'mt:meeting-audio-dir', // ('pick' | 'open')：选择会议录音的保存文件夹（返回选定的路径，取消为 null）/ 打开该文件夹（D-044）
   meetingRevealAudio: 'mt:meeting-reveal-audio', // (id) → boolean：在文件管理器里显示这场会议保存的录音；文件已不在时为 false
+  meetingImport: 'mt:meeting-import', // ({ expectedSpeakers?, minutes? })：选一个 WAV 录音导入为会议（D-046）→ { ok, error?, meetingId?, canceled? }
   voiceprintList: 'mt:voiceprint-list',
   voiceprintRename: 'mt:voiceprint-rename',
   voiceprintDelete: 'mt:voiceprint-delete',

@@ -49,6 +49,19 @@ test('分句：一直不停顿时 20 秒内切开，前后两句不重叠、不�
   for (let i = 1; i < us.length; i++) assert.equal(us[i].start, us[i - 1].end, '首尾相接')
 })
 
+test('分句：中途加入的一路从时间线中间开始（startAt），句子位置与从头送入静音时相同（D-045）', () => {
+  const offset = 30 * 60 * SR // 会议进行 30 分钟后才加入
+  const late = new UtteranceSegmenter()
+  late.startAt(offset)
+  const us = feed(late, [silence(1000), speech(2000), silence(1000)])
+  const ref = feed(new UtteranceSegmenter(), [silence(1000), speech(2000), silence(1000)])
+  assert.equal(us.length, 1)
+  assert.equal(us[0].start, ref[0].start + offset)
+  assert.equal(us[0].end, ref[0].end + offset)
+  assert.deepEqual(us[0].pcm, ref[0].pcm)
+  assert.equal(late.position(), offset + 4 * SR)
+})
+
 test('分句：flush 输出正在说的一句', () => {
   const seg = new UtteranceSegmenter()
   assert.equal(feed(seg, [speech(1500)]).length, 0)

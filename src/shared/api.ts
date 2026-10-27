@@ -104,6 +104,8 @@ export interface MyTypelessBridge {
     audioDir(action: 'pick' | 'open'): Promise<string | null>
     /** 在文件管理器里显示这场会议保存的录音；文件已被移走或删除时为 false */
     revealAudio(id: string): Promise<boolean>
+    /** 导入录音（D-046）：弹出选择框选一个 WAV，建好会议即返回（之后在后台转写、整理）；取消选择时 canceled = true */
+    importRecording(opts?: { expectedSpeakers?: number | null; minutes?: boolean }): Promise<{ ok: boolean; error?: string; meetingId?: string; canceled?: boolean }>
     onLive(cb: (live: MeetingLive) => void): () => void
     onChanged(cb: (meetingId: string) => void): () => void
     onCapture(cb: (c: { on: boolean; micDeviceId: string }) => void): () => void

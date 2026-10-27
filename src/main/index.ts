@@ -694,6 +694,23 @@ function registerIpc(): void {
     if (path) shell.showItemInFolder(path)
     return !!path
   })
+  // 导入录音（D-046）：选一个 WAV（默认打开会议录音的保存文件夹）
+  ipcMain.handle(IPC.meetingImport, async (e, opts?: { expectedSpeakers?: number | null; minutes?: boolean }) => {
+    if (meeting.isActive()) return { ok: false, error: '会议进行中，结束后再导入录音' }
+    const dir = loadSettings().meetingAudioDir
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    const dialogOpts: Electron.OpenDialogOptions = {
+      title: '选择要导入的会议录音',
+      buttonLabel: '导入',
+      defaultPath: dir && existsSync(dir) ? dir : app.getPath('documents'),
+      filters: [{ name: 'WAV 录音', extensions: ['wav'] }],
+      properties: ['openFile']
+    }
+    const res = parent ? await dialog.showOpenDialog(parent, dialogOpts) : await dialog.showOpenDialog(dialogOpts)
+    const file = res.canceled ? null : res.filePaths[0]
+    if (!file) return { ok: false, canceled: true }
+    return meeting.importRecording(file, { expectedSpeakers: opts?.expectedSpeakers, minutes: opts?.minutes })
+  })
   ipcMain.handle(IPC.speakerModelAction, (_e, action: 'download' | 'cancel' | 'remove') => meeting.speakerModelAction(action))
   ipcMain.handle(IPC.voiceprintList, () => meetingStore.listVoiceprints())
   ipcMain.handle(IPC.voiceprintRename, (_e, id: number, name: string) => {

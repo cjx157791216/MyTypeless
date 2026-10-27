@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { mixPcm, recordingFileName, saveRecording, uniquePath } from '../src/main/meeting/recording.ts'
+import { mixPcm, parseRecordingFileName, recordingFileName, saveRecording, uniquePath } from '../src/main/meeting/recording.ts'
 
 const pcmFile = (dir: string, name: string, samples: number[]): string => {
   const path = join(dir, name)
@@ -24,6 +24,17 @@ test('录音文件名：日期在前，去掉文件名里不能用的字符；�
   assert.equal(recordingFileName('  ', at), '2026-10-22 0905 会议.wav')
   assert.equal(recordingFileName('结尾有点. ', at), '2026-10-22 0905 结尾有点.wav')
   assert.ok(recordingFileName('长'.repeat(200), at).length <= 100)
+})
+
+test('导入录音时从文件名还原开始时间与主题（D-046）', () => {
+  const at = new Date(2026, 9, 22, 9, 5).getTime()
+  assert.deepEqual(parseRecordingFileName(recordingFileName('周会', at)), { startedAt: at, title: '周会' })
+  assert.deepEqual(parseRecordingFileName(recordingFileName('10 月 22 日 09:05 的会议', at)), { startedAt: at, title: null })
+  assert.deepEqual(parseRecordingFileName('2026-10-22 0905 周会 (2).wav'), { startedAt: at, title: '周会' })
+  assert.deepEqual(parseRecordingFileName('2026-10-22 0905 产品评审 2.0.WAV'), { startedAt: at, title: '产品评审 2.0' })
+  assert.equal(parseRecordingFileName('录音 1.wav'), null)
+  assert.equal(parseRecordingFileName('2026-13-22 0905 周会.wav'), null)
+  assert.equal(parseRecordingFileName('2026-10-22 0905 周会.mp3'), null)
 })
 
 test('同名文件已存在时加序号，不覆盖', () => {

@@ -69,6 +69,20 @@ test('mt-audiotap：未知参数退出码 2', { skip: skipUnless('mt-audiotap') 
   assert.equal(run('mt-audiotap', ['--bogus']).code, 2)
 })
 
+test('mt-audiotap --list：每个进程带 output（在发声）与 input（在用麦克风，D-045）', { skip: skipUnless('mt-audiotap') }, () => {
+  const r = run('mt-audiotap', ['--list'])
+  if (r.code === 4) return // 系统低于 macOS 14.2 / 不支持进程回环录音
+  assert.equal(r.code, 0)
+  const list = JSON.parse(r.out) as Array<Record<string, unknown>>
+  assert.ok(Array.isArray(list))
+  for (const p of list) {
+    assert.equal(typeof p.pid, 'number')
+    assert.equal(typeof p.bundleId, 'string')
+    assert.equal(typeof p.output, 'boolean')
+    assert.equal(typeof p.input, 'boolean')
+  }
+})
+
 // mt-diarize（npm run diarize / diarize:win）：不带模型只测参数与模型加载失败；降噪 / 识别需要下载模型，见运行记录
 test('mt-diarize：没有任何模型参数退出码 2；模型文件不存在退出码 4', { skip: skipUnless('mt-diarize') }, () => {
   assert.equal(run('mt-diarize', []).code, 2)

@@ -27,6 +27,19 @@ export function recordingFileName(title: string, startedAt: number): string {
   return `${stamp} ${name || '会议'}.wav`
 }
 
+/**
+ * recordingFileName 的反过程（导入录音时还原会议的开始时间与主题，D-046）：「2026-10-22 0905 周会.wav」→ 开始时间与「周会」；
+ * 「… 会议.wav」（没起主题）的主题为 null；同名序号「 (2)」去掉。不是这种文件名时返回 null
+ */
+export function parseRecordingFileName(file: string): { startedAt: number; title: string | null } | null {
+  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) (.+?)(?: \(\d+\))?\.wav$/i.exec(file)
+  if (!m) return null
+  const [y, mo, d, h, mi] = m.slice(1, 6).map(Number)
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return null
+  const title = m[6].trim()
+  return { startedAt: new Date(y, mo - 1, d, h, mi).getTime(), title: title === '会议' ? null : title }
+}
+
 /** 文件夹里已有同名文件时加序号「… (2).wav」，不覆盖 */
 export function uniquePath(dir: string, file: string, exists: (path: string) => boolean = existsSync): string {
   const ext = extname(file)

@@ -90,6 +90,7 @@ const api = {
     exportMarkdown: (id: string) => ipcRenderer.invoke(IPC.meetingExport, id),
     audioDir: (action: 'pick' | 'open') => ipcRenderer.invoke(IPC.meetingAudioDir, action),
     revealAudio: (id: string) => ipcRenderer.invoke(IPC.meetingRevealAudio, id),
+    importRecording: (opts?: { expectedSpeakers?: number | null; minutes?: boolean }) => ipcRenderer.invoke(IPC.meetingImport, opts),
     onLive: (cb: (live: unknown) => void) => {
       const listener = (_e: unknown, live: unknown) => cb(live)
       ipcRenderer.on(IPC.meetingLive, listener)

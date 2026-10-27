@@ -99,6 +99,13 @@ export class UtteranceSegmenter {
     this.vad = new Vad(vad)
   }
 
+  /** 从时间线 pos 处开始（会议中途加入的一路，前面都是静音，不逐帧送入）；只能在推入任何音频之前调用 */
+  startAt(pos: number): void {
+    this.total = pos
+    this.bufStart = pos
+    this.lastSpeechEnd = pos
+  }
+
   /** 当前时间线位置（样本） */
   position(): number {
     return this.total + this.pending.length

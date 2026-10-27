@@ -1,6 +1,6 @@
 import { app, powerMonitor } from 'electron'
-import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, unlinkSync, writeSync } from 'fs'
-import { join } from 'path'
+import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readSync, statSync, unlinkSync, writeSync } from 'fs'
+import { basename, extname, join } from 'path'
 import type { MeetingLive, MeetingSource, MeetingStartOptions, MeetingTrack } from '../../shared/types'
 import { markSpeakerNames } from '../../shared/speaker-mentions'
 import { getKey, hasKey, loadSettings, saveSettings } from '../config'
@@ -34,7 +34,8 @@ import { AppAudioCapture, appAudioSupported, appAudioUnsupportedHint, prepareApp
 import { denoiser, diarizer, speakerModel } from './diarizer'
 import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
-import { recordingFileName, saveRecording, uniquePath } from './recording'
+import { convertWav, readWavInfo } from './import-audio'
+import { parseRecordingFileName, recordingFileName, saveRecording, uniquePath } from './recording'
 import { buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
 import {
   MEETING_VAD,
@@ -115,13 +116,15 @@ interface Active {
   elapsedBefore: number // 之前各段的录音时长
   runningSince: number // 本段开始的时间（暂停时为 0）
   warned: boolean
-  ticker: NodeJS.Timeout
+  ticker?: NodeJS.Timeout // 导入录音时没有
   lastRegroupAt: number
   embedOk: number // 声纹计算成功 / 失败次数：一直失败时提示，不再悄悄全部“未区分”
   embedFailed: number
   echoNoticed: boolean // 已提示过外放回声
   pending: number // 已分出、还没识别完的句子数（积压）
   overloadNoticed: boolean // 已提示过电脑忙、降级处理
+  autoMic: boolean // 开会时选了只用会议软件的声音：会议软件用麦克风（用户在通话中）时自动录入麦克风（D-045）
+  micInUse: boolean // 会议软件此刻在用麦克风
 }
 
 export interface MeetingHooks {
@@ -195,14 +198,8 @@ export class MeetingManager {
     if (source !== 'mic' && (await prepareAppAudio()) === 'waiting') {
       return { ok: false, error: '请先在系统弹出的对话框里允许 MyTypeless 录制系统音频（允许后 MyTypeless 会自动重新打开），然后再开始会议' }
     }
-    let asr: AsrProvider
-    if (settings.asr.provider === 'builtin') {
-      if (!builtinReady(settings)) return { ok: false, error: '还没有下载语音识别模型：请先在设置 → 语音识别里下载' }
-      asr = createBuiltinAsr(settings)
-      prewarmBuiltin(settings)
-    } else {
-      asr = createAsrProvider(settings, getKey('asr'))
-    }
+    const asr = meetingAsr(settings)
+    if (typeof asr === 'string') return { ok: false, error: asr }
     const models = speakerModel.ensure() // 首次开会时下载声纹模型；下载完成前的句子之后补做
     // 已有声纹模型、只缺降噪模型（约 0.5MB，D-024）：等一会儿，下好了本场就能边录边降噪
     if (source !== 'app' && speakerModel.ready() && !speakerModel.denoiserReady()) await Promise.race([models, new Promise((r) => setTimeout(r, 5000))])
@@ -232,29 +229,9 @@ export class MeetingManager {
       appName: appName || null,
       expectedRemote: source !== 'mic' ? expectedRemote : null
     })
-    const denoise = speakerModel.denoiserReady()
-    const newTrack = (track: MeetingTrack, path: string, n: number): Track => ({
-      track,
-      audioPath: path,
-      fd: openSync(path, 'a'),
-      written: 0,
-      // 应用声音是会议软件解码后的干净人声，不降噪（流式降噪器只有一个状态，留给麦克风）
-      segmenter: new UtteranceSegmenter(track === 0 && denoise ? MEETING_VAD_DENOISED : MEETING_VAD),
-      clusterer: new OnlineClusterer(),
-      denoise: track === 0 && denoise,
-      dnChain: Promise.resolve(),
-      dnSent: 0,
-      segFed: 0,
-      expected: n,
-      autoCap: 2,
-      failed: [],
-      lastSpeaker: null,
-      newSegments: 0,
-      capture: null
-    })
     const tracks: Track[] = []
-    if (micPath) tracks.push(newTrack(0, micPath, expected))
-    if (appPath) tracks.push(newTrack(1, appPath, expectedRemote))
+    if (micPath) tracks.push(this.newTrack(0, micPath, expected))
+    if (appPath) tracks.push(this.newTrack(1, appPath, expectedRemote))
     const a: Active = {
       id,
       title,
@@ -277,7 +254,9 @@ export class MeetingManager {
       embedFailed: 0,
       echoNoticed: false,
       pending: 0,
-      overloadNoticed: false
+      overloadNoticed: false,
+      autoMic: source === 'app',
+      micInUse: false
     }
     this.active = a
     this.startCapture(a, appBundleId)
@@ -288,9 +267,32 @@ export class MeetingManager {
     return { ok: true, meetingId: id }
   }
 
-  /** 开始 / 继续采集：麦克风经浮动条，应用声音经 mt-audiotap */
+  private newTrack(track: MeetingTrack, path: string, n: number): Track {
+    const denoise = track === 0 && speakerModel.denoiserReady()
+    return {
+      track,
+      audioPath: path,
+      fd: openSync(path, 'a'),
+      written: 0,
+      // 应用声音是会议软件解码后的干净人声，不降噪（流式降噪器只有一个状态，留给麦克风）
+      segmenter: new UtteranceSegmenter(denoise ? MEETING_VAD_DENOISED : MEETING_VAD),
+      clusterer: new OnlineClusterer(),
+      denoise,
+      dnChain: Promise.resolve(),
+      dnSent: 0,
+      segFed: 0,
+      expected: n,
+      autoCap: 2,
+      failed: [],
+      lastSpeaker: null,
+      newSegments: 0,
+      capture: null
+    }
+  }
+
+  /** 开始 / 继续采集：麦克风经浮动条（自动录入的麦克风只在会议软件用着麦克风时），应用声音经 mt-audiotap */
   private startCapture(a: Active, appBundleId?: string): void {
-    if (this.track(a, 0)) this.hooks.setCapture(true, loadSettings().micDeviceId ?? '')
+    if (this.track(a, 0) && (!a.autoMic || a.micInUse)) this.hooks.setCapture(true, loadSettings().micDeviceId ?? '')
     const t = this.track(a, 1)
     if (!t) return
     const bundle = appBundleId ?? (a.source === 'mic' ? '' : loadSettings().meetingApp ?? '')
@@ -313,7 +315,47 @@ export class MeetingManager {
     else if (e.type === 'silent')
       this.flash(process.platform === 'darwin' ? `一直没有收到${name}的声音：如果对方在说话，请到 系统设置 → 隐私与安全性 → 录屏与系统录音，在「仅系统录音」里允许 MyTypeless` : `一直没有收到${name}的声音：如果对方在说话，请确认${name}正在播放声音、没有被静音（Windows 截取的是它播放出来的声音）`, 20_000)
     else if (e.type === 'failed') this.flash(`无法截取${name}的声音（${e.error}）${a.source === 'mixed' ? '，本场先只用麦克风' : ''}`, 15_000)
+    else if (e.type === 'mic') this.onCallMic(a, e.inUse, name)
     this.emit()
+  }
+
+  /**
+   * 只用会议软件的声音时，会议软件开始用麦克风 = 用户在通话中、会说话：把麦克风也录进来，作为「现场」一路（D-045）；
+   * 会议软件不用麦克风时（挂断、退出通话）停录，再用时继续，中间按真实时间补静音
+   */
+  private onCallMic(a: Active, inUse: boolean, name: string): void {
+    if (!a.autoMic || a.micInUse === inUse) return
+    a.micInUse = inUse
+    if (a.paused) return // 继续时 startCapture 按 micInUse 决定
+    if (!inUse) {
+      if (this.track(a, 0)) this.hooks.setCapture(false, '')
+      return
+    }
+    if (!this.track(a, 0)) {
+      this.addMicTrack(a)
+      this.flash(`检测到${name}正在用麦克风：已同时录下你的麦克风（你说的话记为「现场」）`, 15_000)
+    }
+    this.hooks.setCapture(true, loadSettings().micDeviceId ?? '')
+  }
+
+  /** 会议中途加入麦克风一路（现场默认 1 人：只用会议软件的声音时现场通常只有用户自己，会中会后都能改）；之前的部分是静音 */
+  private addMicTrack(a: Active): void {
+    const app = this.track(a, 1)
+    if (!app) return
+    const path = app.audioPath.replace(/-app\.pcm$/, '.pcm')
+    const t = this.newTrack(0, path, 1)
+    const at = Math.max(app.written, Math.round((this.elapsed(a) / 1000) * SAMPLE_RATE))
+    try {
+      ftruncateSync(t.fd, at * 2) // 前面补静音（文件空洞，不占磁盘、不逐帧送入分句与降噪）
+    } catch (err) {
+      console.warn('[meeting] pad mic track failed:', err)
+    }
+    t.written = t.dnSent = t.segFed = at
+    t.segmenter.startAt(at)
+    a.tracks.unshift(t)
+    a.source = 'mixed'
+    store.updateMeeting(a.id, { source: 'mixed', audioPath: path, expectedSpeakers: 1 })
+    this.hooks.onChanged(a.id)
   }
 
   private track(a: Active, track: MeetingTrack): Track | undefined {
@@ -423,6 +465,7 @@ export class MeetingManager {
     if (!a || a.paused) return
     this.stopCapture(a)
     void this.drainSegmenter(a)
+    if (a.autoMic) a.micInUse = false // 暂停期间不知道会议软件是否还在用麦克风：继续时等截取进程重新报告再开
     a.elapsedBefore = this.elapsed(a)
     a.runningSince = 0
     a.paused = true
@@ -504,6 +547,123 @@ export class MeetingManager {
     if (!row.ended_at) store.updateMeeting(meetingId, { endedAt: Date.now() })
     await this.organize(meetingId, new Map(), store.voiceprintVectors(), opts.minutes !== false)
     return { ok: true }
+  }
+
+  /**
+   * 导入录音（D-046）：把一个 WAV 转成临时录音，按开会时同样的流程（降噪分句、句内换人、声纹、识别、定期重新区分说话人）处理，
+   * 再照常整理。整段录音按一路处理（麦克风 + 会议软件时保存的录音已混成一路）；原文件不动、不复制，记作这场会议保存的录音。
+   * 读完文件头、建好会议就返回，转写在后台进行（主窗口按整理中显示进度）
+   */
+  async importRecording(file: string, opts: { expectedSpeakers?: number | null; minutes?: boolean } = {}): Promise<{ ok: boolean; error?: string; meetingId?: string }> {
+    if (this.active || this.starting) return { ok: false, error: '会议进行中，结束后再导入录音' }
+    if (this.processing) return { ok: false, error: '正在整理其他会议，请稍候' }
+    const settings = loadSettings()
+    const asr = meetingAsr(settings)
+    if (typeof asr === 'string') return { ok: false, error: asr }
+    let durationMs: number
+    try {
+      durationMs = (await readWavInfo(file)).durationMs
+    } catch (err) {
+      return { ok: false, error: (err as Error).message || '无法读取这个文件' }
+    }
+    if (durationMs < 1000) return { ok: false, error: '录音太短，没有可转写的内容' }
+    if (this.active || this.processing) return { ok: false, error: '正在处理其他会议，请稍候' }
+    // MyTypeless 保存的录音（「2026-10-27 1108 周会.wav」）还原开始时间与主题；其他文件按修改时间倒推开始时间、文件名作主题
+    const named = parseRecordingFileName(basename(file))
+    const startedAt = named?.startedAt ?? Math.round(statSync(file).mtimeMs - durationMs)
+    const title = named ? (named.title ?? defaultTitle(startedAt)) : basename(file, extname(file)).trim() || defaultTitle(startedAt)
+    const dir = join(app.getPath('userData'), 'meetings')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `${Date.now()}-import.pcm`)
+    const expected = speakerCount(opts.expectedSpeakers)
+    const id = store.createMeeting({ title, startedAt, expectedSpeakers: expected, audioPath: path, source: 'mic' })
+    store.updateMeeting(id, { status: 'processing', durationMs, endedAt: startedAt + durationMs, savedAudioPath: file })
+    this.processing = { id, stage: '正在读取录音…' }
+    this.emit()
+    this.hooks.onChanged(id)
+    void this.runImport(id, title, file, path, asr, expected, opts.minutes !== false)
+    return { ok: true, meetingId: id }
+  }
+
+  private async runImport(id: string, title: string, file: string, path: string, asr: AsrProvider, expected: number, withMinutes: boolean): Promise<void> {
+    const stage = (text: string) => {
+      if (this.processing?.id !== id || this.processing.stage === text) return
+      this.processing = { id, stage: text }
+      this.emit()
+    }
+    let total: number
+    try {
+      total = await convertWav(file, path, (done, all) => stage(`正在读取录音（${Math.floor((done / all) * 100)}%）…`))
+    } catch (err) {
+      console.warn('[meeting] import convert failed:', err)
+      removeFile(path)
+      store.deleteMeeting(id)
+      this.processing = null
+      this.flash(`没能读取录音：${(err as Error).message || '文件读取失败'}`, 15_000)
+      this.hooks.onChanged(id)
+      return
+    }
+    // 首次使用时下载声纹模型（约 31MB）：说话人区分要用；下载失败照常转写
+    if (!speakerModel.ready()) {
+      stage('正在下载声纹模型…')
+      await speakerModel.ensure().catch(() => undefined)
+    }
+    const t = this.newTrack(0, path, expected)
+    const a: Active = {
+      id,
+      title,
+      source: 'mic',
+      appName: '',
+      tracks: [t],
+      prints: store.voiceprintVectors(),
+      embeddings: new Map(),
+      asr,
+      words: listWords().map((w) => w.word),
+      asrChain: Promise.resolve(),
+      diarChain: Promise.resolve(),
+      paused: false,
+      elapsedBefore: 0,
+      runningSince: 0,
+      warned: false,
+      lastRegroupAt: Date.now(),
+      embedOk: 0,
+      embedFailed: 0,
+      echoNoticed: false,
+      pending: 0,
+      overloadNoticed: false,
+      autoMic: false,
+      micInUse: false
+    }
+    // 按 3 秒一块送入，等前面的句子识别得差不多再送下一块：积压少（不触发“电脑忙”降级，句内换人照常切分），进度也准
+    const step = SAMPLE_RATE * 3
+    try {
+      for (let pos = 0; pos < total; pos += step) {
+        t.written = Math.min(total, pos + step)
+        if (t.denoise) this.sendToDenoiser(a, t)
+        else {
+          const upTo = t.written
+          t.dnChain = t.dnChain.then(() => this.feedSegmenter(a, t, null, upTo))
+        }
+        await t.dnChain
+        if (a.pending > 1) await a.asrChain
+        this.regroupIfDue(a)
+        stage(`正在转写录音（${Math.floor((t.written / total) * 100)}%）…`)
+      }
+      await this.drainSegmenter(a)
+      await a.asrChain
+      await a.diarChain
+    } catch (err) {
+      // 已转写的句子都已落库：照常整理，不丢已有的内容
+      console.warn('[meeting] import transcribe failed:', err)
+      this.flash('录音没能全部转写，已保留转写出的部分', 15_000)
+    }
+    try {
+      closeSync(t.fd)
+    } catch {
+      /* noop */
+    }
+    for (const [s, e] of t.failed) await this.transcribeRange(id, 0, path, s, e, asr, a.words, null)
+    await this.organize(id, a.embeddings, a.prints, withMinutes)
   }
 
   /** 重新生成纪要（改名、改归属后） */
@@ -633,7 +793,11 @@ export class MeetingManager {
       this.flash('会议还有 5 分钟到达 4 小时上限，到时自动结束并整理')
     }
     if (e >= MAX_MEETING_MS) void this.stop()
-    // 会议进行中定期整体重新区分说话人：纠正早期在线归类的错误（不必等到会议结束）
+    this.regroupIfDue(a)
+  }
+
+  /** 会议进行中（导入录音时同样）定期整体重新区分说话人：纠正早期在线归类的错误（不必等到会议结束） */
+  private regroupIfDue(a: Active): void {
     if (a.tracks.some((t) => t.newSegments > 0) && Date.now() - a.lastRegroupAt >= REGROUP_EVERY_MS) {
       a.lastRegroupAt = Date.now()
       let changed = false
@@ -1103,6 +1267,14 @@ export class MeetingManager {
 }
 
 /** 参会人数：1～MAX_SPEAKERS，或 AUTO_SPEAKERS（按声音判断，D-042）；无效时取自动 */
+/** 会议用的识别：内置引擎没下载模型时返回提示 */
+function meetingAsr(settings: ReturnType<typeof loadSettings>): AsrProvider | string {
+  if (settings.asr.provider !== 'builtin') return createAsrProvider(settings, getKey('asr'))
+  if (!builtinReady(settings)) return '还没有下载语音识别模型：请先在设置 → 语音识别里下载'
+  prewarmBuiltin(settings)
+  return createBuiltinAsr(settings)
+}
+
 function speakerCount(n: number | null | undefined): number {
   return n && Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_SPEAKERS) : AUTO_SPEAKERS
 }
@@ -1123,7 +1295,9 @@ function echoFree(micPath: string, appPath: string, start: number, end: number):
     const appPcm = new Int16Array(end + ECHO_AHEAD - from)
     const got = readRange(appPath, Math.max(0, from), end + ECHO_AHEAD)
     appPcm.set(got.subarray(0, appPcm.length - Math.max(0, -from)), Math.max(0, -from))
-    return removeEcho(start, start + mic.length, mic, appPcm).keep
+    const keep = removeEcho(start, start + mic.length, mic, appPcm).keep
+    // 暂停、结束时分句把最后不满一帧的部分补齐成整帧，句子比临时录音长一点：没去掉任何部分时按原句返回（否则误报“外放回声”）
+    return keep.length === 1 && keep[0].start === start && keep[0].end === start + mic.length ? [{ start, end }] : keep
   } catch (err) {
     console.warn('[meeting] echo check failed:', err)
     return [{ start, end }]
