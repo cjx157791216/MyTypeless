@@ -1,5 +1,5 @@
 // mt-audiotap（Windows 版，原创）：线上会议截取会议软件播放的声音（D-033）。协议同 macOS 版（docs/contracts/native-helpers.md）：
-//   mt-audiotap --list    → stdout：有音频会话的进程 [{"pid","bundleId","name","output"}]（output：此刻正在发声）
+//   mt-audiotap --list    → stdout：有音频会话的进程 [{"pid","bundleId","name","output","input"}]（output：此刻正在发声；input：此刻正在用麦克风）
 //   mt-audiotap --apps    → stdout：正在运行的应用 [{"bundleId","name","audio","output"}]，按 exe 合并（bundleId = 小写 exe 文件名）
 //   mt-audiotap --probe   → 试建一次截取：stderr {"ready":true,...} 后退出 0；不支持（低于 Windows 10 build 20348）退出码 4
 //   mt-audiotap [--bundle <exe>]... [--pid <pid>]... [--exclude-bundle <exe>]... [--exclude-pid <pid>]... [--mute] [--verbose]
@@ -8,7 +8,8 @@
 //   （PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE，Chrome 等的声音来自子进程，一起截到），混成一路；
 //   都不给：截取全部系统声音、排除 MyTypeless 自己的进程树（EXCLUDE_TARGET_PROCESS_TREE）。每 2 秒重新匹配进程。
 //   Windows 截取应用声音不需要授权；--mute 不支持（忽略）。只把声音写到 stdout，不写文件、不联网。
-// stderr 每行一条 JSON：{"ready":true,"rate":16000,"channels":1}、{"processes":[pid,...]}、{"error":"..."}、--verbose 时每 2 秒 {"peak":n}
+// stderr 每行一条 JSON：{"ready":true,"rate":16000,"channels":1}、{"processes":[pid,...]}、{"error":"..."}、--verbose 时每 2 秒 {"peak":n}、
+//   {"input":bool}（所截取的进程树是否在用麦克风：就绪后报一次，之后变化时报，D-045）
 // 退出码：2 参数错误；4 不支持 / 建立截取失败；stdout 关闭或父进程退出时退出（0）
 #include "process-info.h"
 #include <ole2.h>
@@ -210,14 +211,14 @@ static std::vector<Proc> Processes() {
   return list;
 }
 
-/** 所有输出设备上的音频会话：pid → 此刻是否在发声 */
-static std::map<DWORD, bool> AudioSessions() {
+/** 所有输出设备（eRender）/ 输入设备（eCapture）上的音频会话：pid → 此刻是否在发声 / 在录音 */
+static std::map<DWORD, bool> AudioSessions(EDataFlow flow = eRender) {
   std::map<DWORD, bool> sessions;
   ComPtr<IMMDeviceEnumerator> devices;
   if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&devices)))) return sessions;
   ComPtr<IMMDeviceCollection> all;
   UINT count = 0;
-  if (FAILED(devices->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &all)) || FAILED(all->GetCount(&count))) return sessions;
+  if (FAILED(devices->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &all)) || FAILED(all->GetCount(&count))) return sessions;
   for (UINT i = 0; i < count; i++) {
     ComPtr<IMMDevice> dev;
     ComPtr<IAudioSessionManager2> mgr;
@@ -259,13 +260,18 @@ static std::set<DWORD> WindowedPids() {
 
 static int PrintList() {
   auto sessions = AudioSessions();
+  auto inputs = AudioSessions(eCapture);
+  for (auto &kv : inputs) sessions.emplace(kv.first, false); // 只在录音的进程也列出
   std::string out = "[";
   for (auto &[pid, output] : sessions) {
     std::wstring path = ExePath(pid);
     if (path.empty()) continue;
+    auto in = inputs.find(pid);
+    bool input = in != inputs.end() && in->second;
     if (out.size() > 1) out += ",";
     out += "{\"pid\":" + std::to_string(pid) + ",\"bundleId\":" + JsonString(WideToUtf8(Lower(FileName(path)))) +
-           ",\"name\":" + JsonString(WideToUtf8(DisplayName(path))) + ",\"output\":" + (output ? "true" : "false") + "}";
+           ",\"name\":" + JsonString(WideToUtf8(DisplayName(path))) + ",\"output\":" + (output ? "true" : "false") +
+           ",\"input\":" + (input ? "true" : "false") + "}";
   }
   WriteStdout(out + "]\n");
   return 0;
@@ -319,6 +325,39 @@ static std::set<DWORD> MatchRoots(const Options &o) {
   for (auto &p : procs)
     if (matched.count(p.pid) && !matched.count(p.parent)) roots.insert(p.pid);
   return roots;
+}
+
+/**
+ * 所截取的进程树此刻是否在用麦克风（D-045）：会议软件在用麦克风 = 用户在通话中。给了 --bundle / --pid 时看匹配进程及其子进程；
+ * 截取全部系统声音时看 MyTypeless 自己进程树之外、有可见窗口的应用（及其子进程）
+ */
+static bool MicInUse(const Options &o, bool all, DWORD self) {
+  auto inputs = AudioSessions(eCapture);
+  bool any = false;
+  for (auto &kv : inputs) any = any || kv.second;
+  if (!any) return false;
+  std::map<DWORD, const Proc *> byPid;
+  auto procs = Processes();
+  for (auto &p : procs) byPid[p.pid] = &p;
+  auto windowed = all ? WindowedPids() : std::set<DWORD>();
+  for (auto &[pid, active] : inputs) {
+    if (!active) continue;
+    bool excluded = false, matched = false, hasWindow = false;
+    DWORD cur = pid;
+    for (int depth = 0; depth < 32 && cur; depth++) { // 沿父进程向上（父进程已退出时链条中断）
+      auto it = byPid.find(cur);
+      if (it == byPid.end()) break;
+      const Proc &p = *it->second;
+      if (cur == self || o.excludePids.count(cur) || o.excludeBundles.count(p.exe)) excluded = true;
+      if (o.pids.count(cur) || o.bundles.count(p.exe)) matched = true;
+      if (windowed.count(cur)) hasWindow = true;
+      if (p.parent == cur) break;
+      cur = p.parent;
+    }
+    if (excluded) continue;
+    if (all ? hasWindow : matched) return true;
+  }
+  return false;
 }
 
 static void WriteReady() {
@@ -386,6 +425,16 @@ static int Capture(const Options &o) {
     }
   }
   WriteReady();
+  int lastInput = -1;
+  auto reportInput = [&]() {
+    int inUse = MicInUse(o, all, self) ? 1 : 0;
+    if (inUse == lastInput) return;
+    lastInput = inUse;
+    std::string line = std::string("{\"input\":") + (inUse ? "true" : "false") + "}\n";
+    fwrite(line.data(), 1, line.size(), stderr);
+    fflush(stderr);
+  };
+  reportInput();
 
   _setmode(_fileno(stdout), _O_BINARY);
   LARGE_INTEGER freq, start, now;
@@ -422,6 +471,7 @@ static int Capture(const Options &o) {
     if (tick - lastMatch >= 2000) {
       lastMatch = tick;
       rematch();
+      reportInput();
     }
     if (o.verbose && tick - lastPeak >= 2000) {
       lastPeak = tick;

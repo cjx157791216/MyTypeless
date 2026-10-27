@@ -72,6 +72,8 @@
 | 应用声音 | `mt-audiotap`、`AppAudioCapture`、`meetings.app_audio_path` | 会议软件等其他应用播放出来的声音（线上会议里对方的声音），由 Core Audio process tap 截取，会议期间临时保存在本机 | D-033 |
 | 声音来源 | `MeetingSource`（`mic` / `mixed` / `app`）、`meetingSource` | 会议录哪里的声音：只用麦克风 / 麦克风 + 会议软件 / 只用会议软件的声音 | D-033 |
 | 现场 / 线上（一路） | `MeetingTrack`（0 / 1）、`track` 列 | 会议录音的一路：麦克风为现场，应用声音为线上；每一路各自区分说话人、各有人数（线上人数 `expected_remote`） | D-033 |
+| 通话中自动录入麦克风 | `autoMic`、`micInUse`、`onCallMic`、`mt-audiotap` 的 `{"input":bool}` | 只用会议软件的声音时，所选会议软件正在用麦克风（用户在通话中）就同时录下用户的麦克风，作为「现场」一路加入 | D-045 |
+| 导入录音 | `importRecording`、`meetingImport`、`import-audio.ts` | 选一个 WAV 录音，按开会同样的流程转写、区分说话人、整理成一场会议 | D-046 |
 | 外放回声 | `removeEcho`、`ECHO_CORR` | 外放时麦克风再录到的对方声音；按时间-频谱包络与同一时刻的应用声音比较后去掉 | D-033 |
 | 在线更新 | `updater.ts`、`UpdateState`、`autoCheckUpdates` | 检查发布地址的新版本 → 提示 → 用户确认后应用内下载 → 重启更新 | D-028 |
 | 发布地址 | `DEFAULT_UPDATE_URL`、`MT_UPDATE_URL` | 存放版本说明与安装包的公开地址（代码仓库 cjx157791216/MyTypeless 的最新 Release；旧版本读取 mytypeless-releases） | D-032 |

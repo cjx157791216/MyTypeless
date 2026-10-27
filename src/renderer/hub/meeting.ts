@@ -219,7 +219,7 @@ function updateSourceUi(): void {
     : source === 'mixed'
       ? '现场的人走麦克风，会议软件里的人走软件的声音，分开区分说话人。建议戴耳机：外放时对方的声音会被麦克风再录一遍（重复的部分会自动去掉）。' + APP_LIST_HINT + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
       : source === 'app'
-        ? '只转写会议软件播放出来的声音（对方的声音），你自己说的话不会被录下。' + APP_LIST_HINT + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
+        ? '转写会议软件播放出来的声音（对方的声音）；你在这个软件里通话、它在用麦克风时，会同时录下你的麦克风，你说的话记为「现场」。' + APP_LIST_HINT + (api.platform === 'darwin' ? '首次使用时系统会请求「录制系统音频」权限。' : '')
         : ''
 }
 
@@ -242,9 +242,10 @@ function renderStartCard(): void {
   const busy = live.state !== 'idle'
   const btn = $('btn-meeting-start') as HTMLButtonElement
   btn.disabled = busy
+  ;($('btn-meeting-import') as HTMLButtonElement).disabled = busy
   const state = $('meeting-start-state')
   if (busy && live.meetingId) {
-    state.innerHTML = live.state === 'processing' ? '上一场会议正在整理中…' : '有会议正在进行：<a class="link" href="#meeting/' + escapeHtml(live.meetingId) + '">查看</a>'
+    state.innerHTML = (live.state === 'processing' ? '有一场会议正在整理：' : '有会议正在进行：') + '<a class="link" href="#meeting/' + escapeHtml(live.meetingId) + '">查看</a>'
   } else if (live.speakerModel === 'downloading') {
     state.textContent = `正在下载声纹模型 ${Math.round((live.speakerModelProgress ?? 0) * 100)}%（首次使用，约 31MB）`
   } else if (live.speakerModel === 'error') {
@@ -271,6 +272,27 @@ $('btn-meeting-start').addEventListener('click', async () => {
   ;($('meeting-title') as HTMLInputElement).value = ''
   toast('会议已开始：请告知参会者正在录音转写')
   navigate(`#meeting/${r.meetingId}`)
+})
+
+// 导入录音（D-046）：人数按开始会议卡片当前选的（麦克风 + 会议软件时现场、线上混在一个文件里，按自动）
+$('btn-meeting-import').addEventListener('click', (e) => {
+  const source = ($('meeting-source') as HTMLSelectElement).value as MeetingSource
+  const expectedSpeakers =
+    source === 'mic' ? countValue($('meeting-speakers') as HTMLSelectElement) : source === 'app' ? countValue($('meeting-remote') as HTMLSelectElement) : AUTO_SPEAKERS
+  endChoice(
+    e.currentTarget as HTMLElement,
+    async (minutes) => {
+      const r = await api.meeting.importRecording({ expectedSpeakers, minutes })
+      if (r.canceled) return
+      if (!r.ok) {
+        $('meeting-start-state').textContent = r.error ?? '无法导入录音'
+        return
+      }
+      toast('正在导入录音：转写完成后自动整理')
+      navigate(`#meeting/${r.meetingId}`)
+    },
+    '导入'
+  )
 })
 
 /** 结束/整理时选择：生成纪要，或只保存记录 */

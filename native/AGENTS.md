@@ -35,6 +35,7 @@
 - Electron / Chromium 应用（Claude、VS Code、Slack…）默认不公开辅助功能树：问系统焦点元素返回 -25204，读不到输入框文字。`mt-focus` 的 `focusedElement` 会改问应用自己的焦点并打开 `AXManualAccessibility`；新增读文字的原生功能要复用它，并用 Electron 应用实测。
 - Windows 读选区 / 光标上下文：Chromium / Electron 应用要先唤醒辅助功能，且唤醒前已获得焦点的输入框要等光标动一次才可读（听写开始时的选区检查负责唤醒）；WinForms 文本框经系统代理“支持”文本模式却读出空串，要退到 `EM_GETSEL` / `WM_GETTEXT`。
 - `mt-audiotap`（macOS）：用户点「允许」录制系统音频后系统会重启所有 MyTypeless 实例，授权必须在开会前用 `--probe` 完成；没授权时只给全零、不报错。
+- `mt-audiotap` 的麦克风占用（`{"input":bool}`，D-045）：截取全部系统声音时只算普通应用（macOS 有 Dock 图标 / Windows 有可见窗口）及其辅助 / 子进程——macOS 的「嘿 Siri」`com.apple.CoreSpeech` 一直占着麦克风，按进程算会一直报 true；MyTypeless 自己（排除的 pid / bundle、Windows 父进程树）录麦克风不能算进去。
 - Windows 版与 macOS 版协议完全一致（同名、带 `.exe`）；stdin/stdout 用二进制模式（换行不被转成 CRLF），文本一律 UTF-8；静态链接运行库，不依赖 VC++ 运行库。
 
 ## 依赖与影响面

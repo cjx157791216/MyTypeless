@@ -108,6 +108,8 @@ export function updateMeeting(
     audioPath: string | null
     appAudioPath: string | null
     savedAudioPath: string | null
+    source: MeetingSource
+    expectedSpeakers: number | null
   }>
 ): void {
   const cols: Record<string, string> = {
@@ -119,7 +121,9 @@ export function updateMeeting(
     minutesError: 'minutes_error',
     audioPath: 'audio_path',
     appAudioPath: 'app_audio_path',
-    savedAudioPath: 'saved_audio_path'
+    savedAudioPath: 'saved_audio_path',
+    source: 'source',
+    expectedSpeakers: 'expected_speakers'
   }
   const keys = Object.keys(patch).filter((k) => k in cols)
   if (!keys.length) return

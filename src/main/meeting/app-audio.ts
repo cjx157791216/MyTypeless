@@ -102,6 +102,7 @@ export type AppAudioEvent =
   | { type: 'waiting-permission' } // 系统授权框还没回应
   | { type: 'silent' } // 一直是纯零：可能没授权
   | { type: 'failed'; error: string } // 多次重启仍失败
+  | { type: 'mic'; inUse: boolean } // 所截取的应用（全部系统声音时为其他应用）开始 / 停止用麦克风（D-045）
 
 export class AppAudioCapture {
   private child: ChildProcess | null = null
@@ -157,7 +158,7 @@ export class AppAudioCapture {
       if (!ready && this.child === child) this.onEvent({ type: 'waiting-permission' })
     }, READY_HINT_MS)
     createInterface({ input: child.stderr! }).on('line', (line) => {
-      let msg: { ready?: boolean; error?: string } = {}
+      let msg: { ready?: boolean; error?: string; input?: boolean } = {}
       try {
         msg = JSON.parse(line)
       } catch {
@@ -167,7 +168,8 @@ export class AppAudioCapture {
         ready = true
         clearTimeout(hint)
         this.onEvent({ type: 'ready' })
-      } else if (msg.error) console.warn('[app-audio]', msg.error)
+      } else if (typeof msg.input === 'boolean') this.onEvent({ type: 'mic', inUse: msg.input })
+      else if (msg.error) console.warn('[app-audio]', msg.error)
     })
     child.stdout!.on('data', (buf: Buffer) => {
       if (this.child !== child) return

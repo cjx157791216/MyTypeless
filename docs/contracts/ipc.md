@@ -51,6 +51,7 @@
 | `meetingExport` | `meeting.exportMarkdown(id)` | 保存对话框，写出纪要 + 完整记录的 Markdown → `boolean` |
 | `meetingAudioDir` | `meeting.audioDir(action)` | 会议录音的保存文件夹（D-044）：`pick` 弹出选择框并写入设置 `meetingAudioDir` → 选定的路径，取消为 `null`；`open` 在文件管理器里打开 → 路径，文件夹不存在为 `null` |
 | `meetingRevealAudio` | `meeting.revealAudio(id)` | 在文件管理器里选中这场会议保存的录音 → `boolean`（没保存或文件已不在为 `false`） |
+| `meetingImport` | `meeting.importRecording(opts?)` | 导入录音（D-046）：`{ expectedSpeakers?, minutes? }`；弹出选择框选一个 WAV（默认打开会议录音的保存文件夹），读完文件头、建好会议即返回 `{ ok, error?, meetingId?, canceled? }`（取消选择为 `canceled: true`），之后在后台转写与整理（进度经 `meetingLive` 的 `processing` 推送）；会议进行中、有会议正在整理、文件不是支持的 WAV、内置识别模型未下载时拒绝 |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |
 | `voiceprintList` / `voiceprintRename` / `voiceprintDelete` | `voiceprints.list/rename/remove` | → 最新 `Voiceprint[]`；改名同步到关联的说话人，删除立即生效（D-016） |
 | `styleSampleList` / `styleSampleDelete` / `styleSampleClear` | `styleSamples.list/remove/clear` | → 最新 `StyleSample[]`（从新到旧）；删除、清空立即生效（D-041） |

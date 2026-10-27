@@ -1,11 +1,12 @@
 // mt-audiotap —— MyTypeless 应用声音截取助手（线上会议：截取会议软件播放出来的对方声音，D-033）
-// 用法: mt-audiotap --list                     → 有音频连接的进程：[{"pid":1,"bundleId":"...","name":"...","output":true}]
-//                                                （output 表示此刻正在发声）
+// 用法: mt-audiotap --list                     → 有音频连接的进程：[{"pid":1,"bundleId":"...","name":"...","output":true,"input":false}]
+//                                                （output 表示此刻正在发声，input 表示此刻正在用麦克风）
 //       mt-audiotap --apps                     → 正在运行的普通应用：[{"bundleId":"...","name":"...","audio":bool,"output":bool}]
 //       mt-audiotap [--bundle <前缀>]... [--pid <pid>]... [--exclude-bundle <前缀>]... [--exclude-pid <pid>]... [--mute] [--verbose]
 //         → stdout 连续输出 16kHz 单声道 s16le（不发声时输出静音，时间线连续）；
 //           stderr 每行一条 JSON：{"ready":true,"rate":48000,"channels":2} / {"processes":[pid,...]} / {"rate":n} /
-//           {"device":"名称"}（换了输出设备）/ {"peak":n}（--verbose，每 2 秒）/ {"error":"..."}
+//           {"device":"名称"}（换了输出设备）/ {"input":bool}（所截取的进程是否在用麦克风：就绪后报一次，之后变化时报）/
+//           {"peak":n}（--verbose，每 2 秒）/ {"error":"..."}
 //           不给 --bundle / --pid：截取全部系统声音（排除 --exclude-* 与自身）；
 //           给 --bundle / --pid：只截取 bundleId 以该前缀开头的进程（Chrome 网页的声音来自 com.google.Chrome.helper）或该进程，每 2 秒重新匹配
 //           --mute：被截取的声音不再从扬声器播放（测试用）
@@ -66,13 +67,15 @@ struct AudioProcess {
     let pid: pid_t
     let bundleId: String
     let output: Bool
+    let input: Bool
 }
 
 func audioProcesses() -> [AudioProcess] {
     readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList, AudioObjectID.self).compactMap { object in
         guard let pid = readValue(object, kAudioProcessPropertyPID, pid_t(-1)), pid > 0 else { return nil }
         let running = readValue(object, kAudioProcessPropertyIsRunningOutput, UInt32(0)) ?? 0
-        return AudioProcess(object: object, pid: pid, bundleId: readString(object, kAudioProcessPropertyBundleID) ?? "", output: running != 0)
+        let input = readValue(object, kAudioProcessPropertyIsRunningInput, UInt32(0)) ?? 0
+        return AudioProcess(object: object, pid: pid, bundleId: readString(object, kAudioProcessPropertyBundleID) ?? "", output: running != 0, input: input != 0)
     }
 }
 
@@ -87,7 +90,7 @@ func printJSON(_ object: Any) {
 if args == ["--list"] {
     printJSON(audioProcesses().map { p -> [String: Any] in
         let name = NSRunningApplication(processIdentifier: p.pid)?.localizedName ?? ""
-        return ["pid": Int(p.pid), "bundleId": p.bundleId, "name": name, "output": p.output]
+        return ["pid": Int(p.pid), "bundleId": p.bundleId, "name": name, "output": p.output, "input": p.input]
     })
     exit(0)
 }
@@ -140,9 +143,31 @@ func excluded(_ p: AudioProcess) -> Bool {
 func matchedObjects() -> [AudioObjectID] {
     let all = audioProcesses()
     if global { return all.filter(excluded).map(\.object) }
-    return all.filter { p in
-        !excluded(p) && (pids.contains(p.pid) || bundles.contains { !p.bundleId.isEmpty && p.bundleId.hasPrefix($0) })
-    }.map(\.object)
+    return all.filter(matches).map(\.object)
+}
+
+func matches(_ p: AudioProcess) -> Bool {
+    !excluded(p) && (pids.contains(p.pid) || bundles.contains { !p.bundleId.isEmpty && p.bundleId.hasPrefix($0) })
+}
+
+/// 所截取的进程（截取全部系统声音时为排除之外的进程）此刻是否在用麦克风：会议软件在用麦克风 = 用户在通话中，
+/// 主进程据此把用户自己的麦克风也录进来（D-045）
+/// 截取全部系统声音时只算普通应用（有 Dock 图标的）及其辅助进程、网页内核：系统常驻的语音唤醒（com.apple.CoreSpeech）一直占着麦克风
+var lastInput: Bool?
+func reportInput() {
+    let procs = audioProcesses().filter { $0.input }
+    let inUse: Bool
+    if global {
+        let apps = NSWorkspace.shared.runningApplications.compactMap { $0.activationPolicy == .regular ? $0.bundleIdentifier : nil }
+        inUse = procs.contains { p in
+            !excluded(p) && !p.bundleId.isEmpty && (p.bundleId.hasPrefix("com.apple.WebKit") || apps.contains { p.bundleId.hasPrefix($0) })
+        }
+    } else {
+        inUse = procs.contains(where: matches)
+    }
+    guard inUse != lastInput else { return }
+    lastInput = inUse
+    emit(["input": inUse])
 }
 
 func tapDescription(_ objects: [AudioObjectID], uuid: UUID) -> CATapDescription {
@@ -341,6 +366,7 @@ if probe {
     exit(0)
 }
 if !global { emit(["processes": current.compactMap { readValue($0, kAudioProcessPropertyPID, pid_t(-1)).map(Int.init) }]) }
+reportInput()
 
 var peak: Int16 = 0
 let stdout = FileHandle.standardOutput
@@ -382,10 +408,10 @@ func rematch() {
 
 // 系统的音频进程列表一变（如浏览器开始播放、会议软件接通）立即重新匹配，不等 2 秒的定时检查（否则丢掉开头一两秒）
 var processListAddr = address(kAudioHardwarePropertyProcessObjectList)
-AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &processListAddr, queue) { _, _ in rematch() }
+AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &processListAddr, queue) { _, _ in rematch(); reportInput() }
 
 // 每 2 秒：父进程退出即退出；换了输出设备就重建（重建期间按真实时间补静音）；
-// 采样率变了重建重采样；再检查一次要截取的进程（进程列表变化的通知之外的兜底）
+// 采样率变了重建重采样；再检查一次要截取的进程（进程列表变化的通知之外的兜底）与麦克风占用
 let originalPpid = getppid()
 let timer = DispatchSource.makeTimerSource(queue: queue)
 timer.schedule(deadline: .now() + 2, repeating: 2)
@@ -408,6 +434,7 @@ timer.setEventHandler {
         emit(["rate": rate])
     }
     rematch()
+    reportInput()
 }
 timer.resume()
 dispatchMain()
