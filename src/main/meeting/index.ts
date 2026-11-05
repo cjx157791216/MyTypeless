@@ -6,7 +6,7 @@ import { markSpeakerNames } from '../../shared/speaker-mentions'
 import { getKey, hasKey, loadSettings, saveSettings } from '../config'
 import { listWords } from '../history'
 import { SAMPLE_RATE } from '../live'
-import { LlmPolisher } from '../polish'
+import { LlmPolisher, isLocalEndpoint } from '../polish'
 import { createAsrProvider, type AsrProvider } from '../providers/asr'
 import { isHallucination } from '../text'
 import { pcm16ToWav } from '../wav'
@@ -36,7 +36,7 @@ import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
 import { convertWav, readWavInfo } from './import-audio'
 import { parseRecordingFileName, recordingFileName, saveRecording, uniquePath } from './recording'
-import { buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
+import { LOCAL_CHUNK_CHARS, buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
 import {
   MEETING_VAD,
   denoiseLagging,
@@ -1247,6 +1247,9 @@ export class MeetingManager {
       const body = await generateMinutesBody(lines, speakers, {
         complete: (system, user) => llm.complete(system, user),
         cache,
+        // 本地模型（ollama 等）一次通常只能算一个请求，且常被默认 4k token 的上下文约束：
+        // 串行请求、每段缩小到约 3000 字，并发只会把请求排在服务器队列里，等不到第一个字就超时（D-047）
+        ...(isLocalEndpoint(settings.llm.baseUrl) ? { concurrency: 1, maxChars: LOCAL_CHUNK_CHARS } : {}),
         progress: (stage) => {
           this.processing = { id: meetingId, stage }
           this.emit()
