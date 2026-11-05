@@ -63,6 +63,10 @@ function joinParts(parts: string[]): string {
 /** 每个纪要请求的转写稿 / 提要最多多少字（约 1 万 token，主流模型的上下文都放得下） */
 export const CHUNK_CHARS = 12_000
 
+/** 本机模型（ollama / LM Studio 等，D-047）的每段上限：常被默认 4k token 的上下文约束，
+ *  要放得下“提示词 + 这一段 + 输出”，约 3000 字 */
+export const LOCAL_CHUNK_CHARS = 3_000
+
 /**
  * 长会议分段：每段不超过 maxChars，且按总长度均分（避免“一大段 + 一小段”）；按行切，不拆开一行。
  * 单行超过上限时单独成段。
