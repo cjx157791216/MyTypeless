@@ -294,6 +294,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .tab-panel { display: none; flex-direction: column; gap: 10px; }
 .tab-panel.active { display: flex; }
 
+.transcript-head { margin-bottom: 10px; }
 .transcript { display: flex; flex-direction: column; gap: 2px; }
 .turn { display: grid; grid-template-columns: 46px 1fr; gap: 12px; padding: 8px 4px; border-radius: 10px; }
 .turn:hover { background: rgba(0, 0, 0, 0.02); }
