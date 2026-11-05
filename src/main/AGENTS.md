@@ -32,7 +32,7 @@
 - 新增 IPC：照 `index.ts` 中 `IPC.historyClear` 的 handler（完整步骤见 recipes）。
 - 表结构增量迁移：照 `history.ts` 的 `migrateColumns`（`PRAGMA table_info` + `ALTER TABLE ADD COLUMN`）。
 - 把错误码翻译成用户提示：`session.ts` 的 `friendlyError`。
-- 新增会议 LLM 任务：提示词写在 `meeting/minutes.ts`（转写稿用 `wrapMeetingTranscript` 包裹），经 `LlmPolisher.complete` 调用（流式，`timeoutMs` 是连续无输出的超时）。
+- 新增会议 LLM 任务：提示词写在 `meeting/minutes.ts`（转写稿用 `wrapMeetingTranscript` 包裹），经 `LlmPolisher.complete` 调用（流式；等首个输出有 10 分钟窗口，开始输出后 `timeoutMs` 是连续无输出的超时；本机端点串行整理，D-047）。
 
 ## 不变量
 

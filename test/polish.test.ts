@@ -14,6 +14,7 @@ import {
   CONTEXT_MAX_CHARS,
   STYLE_SAMPLES_IN_PROMPT,
   createSseParser,
+  isLocalEndpoint,
   LlmPolisher,
   describeLlmError
 } from '../src/main/polish.ts'
@@ -167,7 +168,8 @@ function fakeLlm(handler: (res: ServerResponse, body: Record<string, unknown>) =
     })
   })
 }
-const llmFor = (baseUrl: string, idleMs: number) => new LlmPolisher({ llm: { baseUrl, model: 'm' } } as unknown as Settings, 'k', idleMs)
+const llmFor = (baseUrl: string, idleMs: number, firstByteMs?: number) =>
+  new LlmPolisher({ llm: { baseUrl, model: 'm' } } as unknown as Settings, 'k', idleMs, firstByteMs)
 const sse = (res: ServerResponse, delta: object) => res.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`)
 
 test('LlmPolisher.complete：流式接收，模型一直在输出（含思考过程）时总耗时超过超时也不放弃', async () => {
@@ -212,6 +214,56 @@ test('LlmPolisher.complete：服务不支持流式、直接返回整段 JSON 时
   } finally {
     srv.close()
   }
+})
+
+test('LlmPolisher.complete：等第一个输出有更宽的窗口（本地模型要先加载模型、排队），开始输出后再按连续无输出计时', async () => {
+  const srv = await fakeLlm((res) => {
+    setTimeout(() => { // 本地模型（ollama 等）：请求先在服务器排队，过一会儿才开始吐字
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      sse(res, { content: '开头' })
+      res.end('data: [DONE]\n\n')
+    }, 300)
+  })
+  try {
+    // “连续无输出”超时 100ms 远小于排队时间；等首字节的窗口放宽到 2 秒
+    assert.equal(await llmFor(srv.url, 100, 2_000).complete('s', 'u'), '开头')
+  } finally {
+    srv.close()
+  }
+})
+
+test('LlmPolisher.complete：超过首字节窗口还没有任何输出才放弃，并说明原因', async () => {
+  const srv = await fakeLlm(() => {}) // 收到请求后一直不回
+  try {
+    await assert.rejects(llmFor(srv.url, 100, 250).complete('s', 'u'), /没有开始输出/)
+  } finally {
+    srv.close()
+  }
+})
+
+test('LlmPolisher.complete：整段 JSON 生成得慢也不算超时（没有流可观察，只受总时长约束）', async () => {
+  const srv = await fakeLlm((res) => {
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ choices: [{ message: { content: '慢出来的整段结果' } }] }))
+    }, 300)
+  })
+  try {
+    assert.equal(await llmFor(srv.url, 100).complete('s', 'u'), '慢出来的整段结果')
+  } finally {
+    srv.close()
+  }
+})
+
+test('isLocalEndpoint：认出本机推理服务（ollama、LM Studio 等），云端地址不算', () => {
+  assert.equal(isLocalEndpoint('http://localhost:11434/v1'), true)
+  assert.equal(isLocalEndpoint('http://127.0.0.1:1234/v1'), true)
+  assert.equal(isLocalEndpoint('http://0.0.0.0:8000/v1'), true)
+  assert.equal(isLocalEndpoint('http://[::1]:11434/v1'), true)
+  assert.equal(isLocalEndpoint('http://LOCALHOST:11434/v1'), true)
+  assert.equal(isLocalEndpoint('https://open.bigmodel.cn/api/paas/v4'), false)
+  assert.equal(isLocalEndpoint('https://api.deepseek.com/v1'), false)
+  assert.equal(isLocalEndpoint('api.example.com/v1'), false)
 })
 
 // —— 设置页「测试连接」：收到第一段输出就算连通；失败说清原因并带上服务端原话 ——

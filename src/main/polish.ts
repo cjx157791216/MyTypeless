@@ -202,15 +202,32 @@ export function llmTimeoutMs(textLength: number): number {
   return Math.min(180_000, 25_000 + textLength * 30)
 }
 
+/** complete() 等第一个输出的窗口：本地模型（ollama / LM Studio）要先加载模型、算完整个输入才有第一个字，
+ *  排队的请求（服务器一次通常只能算一个）等得更久，比流式输出之间的间隔长得多 */
+export const FIRST_BYTE_MAX_MS = 10 * 60_000
+
+/** 本机推理端点（ollama、LM Studio 等，D-047）：一次通常只能算一个请求，会议纪要整理时按串行调用，
+ *  并发只会把请求排在服务器的队列里，等不到第一个字就超时 */
+export function isLocalEndpoint(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]' || host.endsWith('.localhost')
+  } catch {
+    return false
+  }
+}
+
 export class LlmPolisher {
   private readonly settings: Settings
   private readonly apiKey: string
   private readonly timeoutMs: number
+  private readonly firstByteMs: number
 
-  constructor(settings: Settings, apiKey: string, timeoutMs = 25_000) {
+  constructor(settings: Settings, apiKey: string, timeoutMs = 25_000, firstByteMs = FIRST_BYTE_MAX_MS) {
     this.settings = settings
     this.apiKey = apiKey
     this.timeoutMs = timeoutMs
+    this.firstByteMs = firstByteMs
   }
 
   hasKey(): boolean {
@@ -241,31 +258,36 @@ export class LlmPolisher {
 
   /**
    * 通用补全（会议纪要等）：调用方自备提示词，转写内容须自行用 <transcript> 包裹。
-   * 流式接收：推理模型（如 GLM-5.3 强制深度思考）长输入要先思考几分钟，一次性等结果会整体超时；
-   * 这里 timeoutMs 是“连续没有任何输出（含思考过程）”的超时，另有总时长上限。
+   * 流式接收：推理模型（如 GLM-5.3 强制深度思考）长输入要先思考几分钟，一次性等结果会整体超时。
+   * 等第一个输出的窗口放宽到 firstByteMs（本地模型要加载模型、排队、算完整个输入才开始吐字，D-047）；
+   * 开始输出后按 timeoutMs 计“连续没有任何输出（含思考过程）”；另有总时长上限。
    */
   async complete(system: string, user: string, temperature = 0.3): Promise<string> {
     const ctrl = new AbortController()
-    let reason: 'idle' | 'total' | null = null
+    let reason: 'first' | 'idle' | 'total' | null = null
     let idle: ReturnType<typeof setTimeout> | undefined
-    const kick = () => {
+    const firstWindow = Math.max(this.firstByteMs, this.timeoutMs)
+    const arm = (first: boolean) => {
       clearTimeout(idle)
-      idle = setTimeout(() => ((reason = 'idle'), ctrl.abort()), this.timeoutMs)
+      idle = setTimeout(() => ((reason = first ? 'first' : 'idle'), ctrl.abort()), first ? firstWindow : this.timeoutMs)
     }
     const total = setTimeout(() => ((reason = 'total'), ctrl.abort()), COMPLETE_MAX_MS)
-    kick()
+    arm(true) // 响应头与第一个字节都可能来得慢（排队、加载模型），同属首字节阶段
     try {
       const res = await this.request(system, user, temperature, ctrl.signal, true)
-      kick()
-      // 不支持流式的服务会直接返回整段 JSON
-      if (!(res.headers.get('content-type') ?? '').includes('text/event-stream')) return await readCompletion(res)
+      arm(true)
+      // 不支持流式的服务会直接返回整段 JSON：没有流可观察，等它写完为止（只受总时长约束）
+      if (!(res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+        clearTimeout(idle)
+        return await readCompletion(res)
+      }
       const parser = createSseParser()
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       while (!parser.done()) {
         const { done, value } = await reader.read()
         if (done) break
-        kick()
+        arm(false) // 已开始输出，改按“连续无输出”计时
         parser.push(decoder.decode(value, { stream: true }))
       }
       reader.cancel().catch(() => {})
@@ -273,6 +295,8 @@ export class LlmPolisher {
       if (!text) throw new Error('LLM_EMPTY_RESPONSE')
       return text
     } catch (err) {
+      if (reason === 'first')
+        throw new Error(`等了 ${Math.max(1, Math.round(firstWindow / 60_000))} 分钟服务器还没有开始输出（本地模型可能在加载或排队），已放弃；可稍后重试，或换更小 / 更快的模型`)
       if (reason === 'idle') throw new Error(`模型连续 ${Math.round(this.timeoutMs / 1000)} 秒没有任何输出，已放弃（可稍后重试或换个模型）`)
       if (reason === 'total') throw new Error(`超过 ${COMPLETE_MAX_MS / 60_000} 分钟仍未完成，已放弃（可稍后重试或换个模型）`)
       throw err

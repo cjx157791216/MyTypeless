@@ -599,6 +599,14 @@ test('generateMinutesBody：短会议一次生成；长会议先并发整理各�
   assert.ok(stages.includes('正在整理各段（5/5）…') && stages.at(-1) === '正在生成会议纪要…', stages.join(' | '))
 })
 
+test('generateMinutesBody：concurrency 1 时各段串行整理（本地模型一次通常只能算一个请求）', async () => {
+  const m = fakeModel()
+  const lines = Array.from({ length: 500 }, (_, i) => line(i)) // 约 5.4 万字 → 5 段
+  await generateMinutesBody(lines, ['张三'], { complete: m.complete, concurrency: 1 })
+  assert.deepEqual(m.calls.map((c) => c.kind), ['notes', 'notes', 'notes', 'notes', 'notes', 'minutes'])
+  assert.equal(m.maxInFlight(), 1)
+})
+
 test('generateMinutesBody：各段提要合起来超过上限时逐层合并，最后一次请求不超过上限', async () => {
   const m = fakeModel({ notesLen: 3_000 }) // 每段提要 3000 字，十几段合起来 4 万多字
   const lines = Array.from({ length: 1_400 }, (_, i) => line(i))
