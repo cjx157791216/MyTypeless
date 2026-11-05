@@ -345,7 +345,7 @@ export const IPC = {
   meetingAudioApps: 'mt:meeting-audio-apps', // → { supported, apps }：可截取声音的应用（D-033）
   meetingPrepareAppAudio: 'mt:meeting-prepare-app-audio', // → 'ready' | 'waiting' | 'unsupported'：开会前先完成「录制系统音频」授权
   meetingFinish: 'mt:meeting-finish', // 整理异常中断的会议（id, { minutes?: boolean }）
-  meetingExport: 'mt:meeting-export', // 导出 Markdown（保存对话框）
+  meetingExport: 'mt:meeting-export', // 导出 Markdown（保存对话框；part：纪要 / 转写，跟着详情页标签页）
   meetingAudioDir: 'mt:meeting-audio-dir', // ('pick' | 'open')：选择会议录音的保存文件夹（返回选定的路径，取消为 null）/ 打开该文件夹（D-044）
   meetingRevealAudio: 'mt:meeting-reveal-audio', // (id) → boolean：在文件管理器里显示这场会议保存的录音；文件已不在时为 false
   meetingImport: 'mt:meeting-import', // ({ expectedSpeakers?, minutes? })：选一个 WAV 录音导入为会议（D-046）→ { ok, error?, meetingId?, canceled? }

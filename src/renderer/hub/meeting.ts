@@ -347,6 +347,9 @@ function renderDetail(): void {
   const audio = $('btn-meeting-reveal-audio')
   audio.classList.toggle('hidden', !d.savedAudioPath)
   audio.title = d.savedAudioPath ?? ''
+  // 导出 Markdown 跟着标签页：纪要页导出纪要（没有则不显示），转写页导出完整转写稿，说话人页没有可导出的
+  const exportable = tab === 'minutes' ? !!d.minutes : tab === 'transcript' && d.segments.length > 0
+  $('btn-meeting-export').classList.toggle('hidden', !exportable)
   ;($('btn-meeting-delete') as HTMLButtonElement).disabled = isLiveHere() || (live.state === 'processing' && live.meetingId === d.id)
   renderSpeakerBar()
   renderTranscript()
@@ -733,7 +736,8 @@ $('btn-meeting-reveal-audio').addEventListener('click', async () => {
   if (detail && !(await api.meeting.revealAudio(detail.id))) toast('录音文件已被移走或删除')
 })
 $('btn-meeting-export').addEventListener('click', async () => {
-  if (detail && (await api.meeting.exportMarkdown(detail.id))) toast('已导出')
+  if (!detail) return
+  if (await api.meeting.exportMarkdown(detail.id, tab === 'minutes' ? 'minutes' : 'transcript')) toast('已导出')
 })
 $('btn-meeting-delete').addEventListener('click', async () => {
   const kept = detail?.savedAudioPath ? `\n\n保存到文件夹里的录音（${detail.savedAudioPath}）不会删除。` : ''

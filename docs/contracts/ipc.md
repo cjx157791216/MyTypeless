@@ -48,7 +48,7 @@
 | `meetingAudioApps` | `meeting.audioApps()` | → `{ supported, apps: AudioApp[] }`：可截取声音的正在运行的应用（`{ bundleId, name, audio, output, kind }`，`kind` 为 `call`（通话软件）/ `browser`（网页会议）/ `other`；按通话软件 → 浏览器 → 其他排序，不含 MyTypeless；分类见 `meeting/call-apps.ts`，D-039）；`supported = false` 表示系统低于 macOS 14.2（D-033） |
 | `meetingPrepareAppAudio` | `meeting.prepareAppAudio()` | 开会前先完成「录制系统音频」授权 → `'ready' \| 'waiting' \| 'unsupported'`；`waiting` = 系统授权框还没回应（用户允许后 macOS 会退出并重新打开 MyTypeless，所以必须在开会前）（D-033） |
 | `meetingFinish` | `meeting.finish(id, opts?)` | 整理异常中断的会议：补转写临时录音尾部后照常整理 → `{ ok, error? }` |
-| `meetingExport` | `meeting.exportMarkdown(id)` | 保存对话框，写出纪要 + 完整记录的 Markdown → `boolean` |
+| `meetingExport` | `meeting.exportMarkdown(id, part)` | 保存对话框；`part` 为 `'minutes' | 'transcript'`，纪要与完整转写稿分别导出（文件名带「纪要 / 转写」后缀）→ `boolean` |
 | `meetingAudioDir` | `meeting.audioDir(action)` | 会议录音的保存文件夹（D-044）：`pick` 弹出选择框并写入设置 `meetingAudioDir` → 选定的路径，取消为 `null`；`open` 在文件管理器里打开 → 路径，文件夹不存在为 `null` |
 | `meetingRevealAudio` | `meeting.revealAudio(id)` | 在文件管理器里选中这场会议保存的录音 → `boolean`（没保存或文件已不在为 `false`） |
 | `meetingImport` | `meeting.importRecording(opts?)` | 导入录音（D-046）：`{ expectedSpeakers?, minutes? }`；弹出选择框选一个 WAV（默认打开会议录音的保存文件夹），读完文件头、建好会议即返回 `{ ok, error?, meetingId?, canceled? }`（取消选择为 `canceled: true`），之后在后台转写与整理（进度经 `meetingLive` 的 `processing` 推送）；会议进行中、有会议正在整理、文件不是支持的 WAV、内置识别模型未下载时拒绝 |
