@@ -562,6 +562,7 @@ function renderTranscript(): void {
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80
   box.innerHTML = ''
   const d = detail!
+  ;($('btn-transcript-export') as HTMLButtonElement).disabled = !d.segments.length
   if (!d.segments.length) {
     box.innerHTML = `<div class="empty">${isLiveHere() ? '等待发言…说完一句话后会出现在这里' : '没有转写内容'}</div>`
     return
@@ -683,6 +684,7 @@ function renderMinutes(): void {
   view.classList.toggle('hidden', editing)
   ;($('btn-minutes-edit') as HTMLButtonElement).disabled = !d.minutes || editing
   ;($('btn-minutes-copy') as HTMLButtonElement).disabled = !d.minutes
+  ;($('btn-minutes-export') as HTMLButtonElement).disabled = !d.minutes
   const regen = $('btn-minutes-regen') as HTMLButtonElement
   regen.textContent = d.minutes ? '重新生成' : '生成纪要'
   regen.disabled = isLiveHere() || processingHere || d.status === 'interrupted' || !d.segments.length
@@ -732,9 +734,9 @@ $('btn-meeting-stop').addEventListener('click', () => endChoice($('btn-meeting-s
 $('btn-meeting-reveal-audio').addEventListener('click', async () => {
   if (detail && !(await api.meeting.revealAudio(detail.id))) toast('录音文件已被移走或删除')
 })
-$('btn-meeting-export').addEventListener('click', async () => {
-  if (detail && (await api.meeting.exportMarkdown(detail.id))) toast('已导出')
-})
+const exportMeeting = (part: 'minutes' | 'transcript') => detail && api.meeting.exportMarkdown(detail.id, part).then((ok) => ok && toast('已导出'))
+$('btn-minutes-export').addEventListener('click', () => void exportMeeting('minutes'))
+$('btn-transcript-export').addEventListener('click', () => void exportMeeting('transcript'))
 $('btn-meeting-delete').addEventListener('click', async () => {
   const kept = detail?.savedAudioPath ? `\n\n保存到文件夹里的录音（${detail.savedAudioPath}）不会删除。` : ''
   if (!detail || !confirm(`删除会议「${detail.title}」？文字、说话人和临时录音都会删除，不可恢复。${kept}`)) return

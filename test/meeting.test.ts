@@ -387,14 +387,20 @@ test('纪要：转写稿合并同一人连续发言、时间格式、长会议�
   assert.ok(chunks.length >= 3 && chunks.every((c) => c.length <= 200))
 })
 
-test('纪要：头部本地生成；模型输出去掉围栏和一级标题；导出带完整记录', () => {
+test('纪要：头部本地生成；模型输出去掉围栏和一级标题；导出按标签页分开（纪要 / 转写）', () => {
   const header = minutesHeader({ title: '周会', startedAt: new Date(2026, 9, 15, 14, 5).getTime(), durationMs: 1_800_000, speakers: ['张三', '李四'] })
   assert.match(header, /^# 周会\n/)
   assert.match(header, /2026-10-15 14:05/)
   assert.match(header, /参会人：\*\*张三\*\*、\*\*李四\*\*/)
   assert.equal(cleanMinutesBody('```markdown\n# 纪要\n## 决议\n- 无\n```'), '## 决议\n- 无')
-  const md = exportMarkdown('# 周会\n\n## 决议\n- 无', ['[00:00] 张三：好'])
-  assert.match(md, /## 完整记录\n\n\[00:00\] 张三：好\n$/)
+  const meta = { title: '周会', startedAt: new Date(2026, 9, 15, 14, 5).getTime(), durationMs: 1_800_000, speakers: ['张三', '李四'] }
+  // 纪要页：只导出纪要本身（已含信息头部），不带完整记录
+  const minutesMd = exportMarkdown('minutes', meta, '# 周会\n\n- 时间：…\n\n## 决议\n- 无', ['[00:00] 张三：好'])
+  assert.equal(minutesMd, '# 周会\n\n- 时间：…\n\n## 决议\n- 无\n')
+  // 转写页：信息头部 + 完整记录；纪要没生成也照常导出
+  const transcriptMd = exportMarkdown('transcript', meta, null, ['[00:00] 张三：好', '[00:10] 李四：行'])
+  assert.match(transcriptMd, /^# 周会\n/)
+  assert.match(transcriptMd, /参会人：\*\*张三\*\*、\*\*李四\*\*\n\n## 完整记录\n\n\[00:00\] 张三：好\n\n\[00:10\] 李四：行\n$/)
 })
 
 test('Markdown 展示：标题、列表、任务、粗体；HTML 被转义', () => {

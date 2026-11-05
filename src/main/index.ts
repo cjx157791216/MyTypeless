@@ -657,16 +657,18 @@ function registerIpc(): void {
   ipcMain.handle(IPC.meetingAudioApps, async () => ({ supported: appAudioSupported(), apps: await listAudioApps() }))
   ipcMain.handle(IPC.meetingPrepareAppAudio, () => prepareAppAudio())
   ipcMain.handle(IPC.meetingFinish, (_e, id: string, opts?: { minutes?: boolean }) => meeting.finish(id, opts ?? {}))
-  ipcMain.handle(IPC.meetingExport, async (e, id: string) => {
+  ipcMain.handle(IPC.meetingExport, async (e, id: string, part: 'minutes' | 'transcript') => {
     const d = meetingStore.getMeetingDetail(id)
     if (!d) return false
     const names = new Map(d.speakerList.map((s) => [s.id, s.displayName]))
     const transcript = buildTranscript(d.segments.map((s) => ({ startMs: s.startMs, speaker: (s.speakerId !== null && names.get(s.speakerId)) || '未区分', text: s.text })))
+    const meta = { title: d.title, startedAt: d.startedAt, durationMs: d.durationMs, speakers: d.speakerList.map((s) => s.displayName) }
+    const suffix = part === 'minutes' ? '纪要' : '转写'
     const parent = BrowserWindow.fromWebContents(e.sender)
-    const opts = { defaultPath: `${d.title.replace(/[\\/:*?"<>|]/g, '_')}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] }
+    const opts = { defaultPath: `${d.title.replace(/[\\/:*?"<>|]/g, '_')}-${suffix}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] }
     const res = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts)
     if (res.canceled || !res.filePath) return false
-    writeFileSync(res.filePath, exportMarkdown(d.minutes, transcript), 'utf-8')
+    writeFileSync(res.filePath, exportMarkdown(part, meta, d.minutes, transcript), 'utf-8')
     return true
   })
   // 保存会议录音（D-044）：选文件夹 / 打开文件夹 / 显示某场会议的录音

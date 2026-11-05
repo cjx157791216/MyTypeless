@@ -99,7 +99,7 @@ export interface MyTypelessBridge {
     audioApps(): Promise<{ supported: boolean; apps: AudioApp[] }>
     /** 开会前先完成「录制系统音频」授权；waiting = 系统授权框还没回应 */
     prepareAppAudio(): Promise<'ready' | 'waiting' | 'unsupported'>
-    exportMarkdown(id: string): Promise<boolean>
+    exportMarkdown(id: string, part: 'minutes' | 'transcript'): Promise<boolean>
     /** 会议录音的保存文件夹（D-044）：pick = 弹出选择框并保存设置（取消为 null）；open = 在文件管理器里打开（文件夹不存在时为 null） */
     audioDir(action: 'pick' | 'open'): Promise<string | null>
     /** 在文件管理器里显示这场会议保存的录音；文件已被移走或删除时为 false */

@@ -288,10 +288,9 @@ export function cleanMinutesBody(text: string): string {
   return t
 }
 
-/** 导出用：纪要 + 完整转写稿 */
-export function exportMarkdown(minutes: string | null, transcript: string[]): string {
-  const parts: string[] = []
-  if (minutes) parts.push(minutes.trim(), '')
-  parts.push('## 完整记录', '', ...transcript.map((l) => `${l}\n`))
-  return parts.join('\n').trimEnd() + '\n'
+/** 导出用：纪要与完整转写稿分开导出（详情页的导出按钮跟着标签页）；
+ *  纪要本身已含信息头部（本地生成 + 用户可能的编辑），转写稿在这里补一份。 */
+export function exportMarkdown(part: 'minutes' | 'transcript', meta: MinutesMeta, minutes: string | null, transcript: string[]): string {
+  if (part === 'minutes') return `${(minutes ?? '').trimEnd()}\n`
+  return [minutesHeader(meta), '## 完整记录', '', ...transcript.map((l) => `${l}\n`)].join('\n').trimEnd() + '\n'
 }
