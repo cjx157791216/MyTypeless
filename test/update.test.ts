@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { compareVersions as cmp, DEFAULT_UPDATE_URL, friendlyUpdateError, isUnpackedWin, needsManualInstall, pendingIsInstalled, releasePageUrl, UPDATER_CACHE_DIR, updateUrl } from '../src/main/update-info.ts'
+import { compareVersions as cmp, DEFAULT_UPDATE_URL, friendlyUpdateError, isUnpackedWin, needsManualInstall, pendingIsInstalled, releasePageUrl, releasesLatestUrl, UPDATER_CACHE_DIR, updateUrl } from '../src/main/update-info.ts'
 
 const require = createRequire(import.meta.url)
 const { compareVersions, parseArtifact, parseWinArtifact, parseWinZip, buildFeed, githubAssetUrl, waitForVersion, winRunTitle } = require('../scripts/publish.cjs')
@@ -48,6 +48,7 @@ test('Windows 解压即用版（zip）：程序旁没有卸载程序即为解压
   assert.equal(isUnpackedWin('win32', ['MyTypeless.exe', 'Uninstall MyTypeless.exe', 'resources']), false) // 安装版
   assert.equal(isUnpackedWin('darwin', ['MyTypeless']), false)
   assert.equal(releasePageUrl('0.3.1'), 'https://github.com/cjx157791216/MyTypeless/releases/tag/v0.3.1')
+  assert.equal(releasesLatestUrl(), 'https://github.com/cjx157791216/MyTypeless/releases/latest')
   assert.deepEqual(parseWinZip('MyTypeless-0.3.1-20261018.1015-win-x64.zip'), { version: '0.3.1', build: '20261018.1015' })
   assert.equal(parseWinZip('MyTypeless-0.3.1-20261018.1015-arm64.zip'), null) // macOS 的 zip 不是
   assert.equal(parseArtifact('MyTypeless-0.3.1-20261018.1015-win-x64.zip'), null)

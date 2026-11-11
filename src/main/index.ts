@@ -20,6 +20,7 @@ import { findModel } from './whisper/catalog'
 import { killOrphanEngines } from './whisper/engine'
 import { appInfo, versionLabel } from './build-info'
 import * as updater from './updater'
+import { releasesLatestUrl } from './update-info'
 import { stopTracking } from './learner'
 import { MeetingManager, meetingStore } from './meeting'
 import { appAudioSupported, listAudioApps, prepareAppAudio } from './meeting/app-audio'
@@ -628,6 +629,7 @@ function registerIpc(): void {
     const url = updater.updateState().dmgUrl
     if (url && /^https?:\/\//.test(url)) void shell.openExternal(url)
   })
+  ipcMain.handle(IPC.updateOpenReleases, () => void shell.openExternal(releasesLatestUrl()))
 
   // —— 会议模式（D-015）——
   ipcMain.handle(IPC.meetingStart, (_e, opts?: MeetingStartOptions) => {

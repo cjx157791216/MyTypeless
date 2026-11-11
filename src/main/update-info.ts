@@ -51,6 +51,11 @@ export function releasePageUrl(version: string): string {
   return `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
 }
 
+/** GitHub Releases 页面（最新版）：应用内「官方下载」入口，两个平台都能从这里手动下载安装包 */
+export function releasesLatestUrl(): string {
+  return `https://github.com/${GITHUB_REPO}/releases/latest`
+}
+
 /** electron-updater / Squirrel 的错误 → 给用户看的一句话 */
 export function friendlyUpdateError(message: string): string {
   const m = message || ''

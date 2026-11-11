@@ -20,6 +20,7 @@
 
 ## 不变量与陷阱
 
+- Swift 助手编译必须显式指定部署目标（`scripts/build-native.sh`：四个助手 13.0、`mt-audiotap` 14.2）：不指定时 swiftc 按编译机的 SDK 出 minos，新系统上编出的产物依赖 macOS 26+ 才有的 Swift 运行时库（`libswift_DarwinFoundation*`），老系统 dyld 加载即崩（issue #59）。`electron-builder.yml` 的 `mac.minimumSystemVersion: 13.0` 与之配套。
 - 签名：`electron-builder.yml` 的 `identity: null` 让 electron-builder 完全跳过签名，由 `sign-app.cjs` 补签：有本地证书就用证书签名（重新打包后系统授权仍有效），没有才退回 adhoc（每次打包都要重新授权）。不要删 `.vendor/signing/`，删了证书会变、所有授权失效。从 adhoc 版本换到证书签名版本时，旧授权记录无效但开关显示为开：主窗口「重置授权」按钮会清除本应用的旧记录。
 - 在线更新（D-028）按**版本号**判断新旧，不看构建号：发布前必须升级 `package.json` 的 `version`（`npm run release` 会拒绝不更大的版本）。自动安装要求新旧版本同一证书签名；应用不在「应用程序」文件夹（如直接从 DMG 运行）时 Squirrel 无法替换。开发运行不检查更新；测试用打包版 + `MT_UPDATE_URL=http://127.0.0.1:<端口>/latest` 指向本机临时服务器。
 - Windows 安装包（D-036）：electron-builder 写 exe 图标要用的 winCodeSign 工具包里有 macOS 符号链接，没开开发者模式的普通用户解压失败、打包中止——`dist.cjs` 的 `prepareWinCodeSign` 预先解压（跳过 darwin 目录）；Windows 不传 `buildVersion`（文件版本每段最大 65535，放不下 YYYYMMDD 构建号）；构建号固定按北京时间算（`dist.cjs` 的 `BUILD_UTC_OFFSET_HOURS`），否则 GitHub 的 Windows 机器（UTC）打出的包比 Mac 包早 8 小时。文件名带操作系统（`-win-x64`），改名时同步 `publish.cjs` 的解析与 `release-windows.yml`。

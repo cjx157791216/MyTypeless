@@ -102,6 +102,15 @@ void api.system.appInfo().then((info) => {
   $('about-commit').textContent = info.commit
 })
 
+// 「官方下载」链接走主进程 openExternal（窗口内导航被禁止，外链必须经 IPC）
+const aboutDownload = $('about-download') as HTMLAnchorElement
+for (const ev of ['click', 'auxclick']) {
+  aboutDownload.addEventListener(ev, (e) => {
+    e.preventDefault()
+    if (ev === 'click' || (e as MouseEvent).button === 1) void api.update.openReleases()
+  })
+}
+
 void (async () => {
   await loadSettingsIntoUi()
   renderShortcuts() // 也填好各页写着主键名的地方（会议页说明等）

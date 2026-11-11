@@ -31,6 +31,7 @@
 | `updateDownload` / `updateCancel` | `update.download()` / `update.cancel()` | 有新版本（或下载失败）时开始下载 / 取消下载 → `UpdateState`；进度经 `updateState` 推送 |
 | `updateInstall` | `update.install()` | → `{ ok, error? }`：已下载时重启并安装；录音、会议或整理中拒绝 |
 | `updateOpenDownload` | `update.openDownload()` | 用浏览器打开新版本 DMG 地址（自动安装失败时手动安装） |
+| `updateOpenReleases` | `update.openReleases()` | 用浏览器打开 GitHub Releases 页面（设置 → 关于 的「官方下载」链接） |
 | `historyStats` | `history.stats()` | → `HistoryStats { count, totalDurationMs, totalChars, weekCount, todayChars }`（首页概览；提问不计字数） |
 | `meetingStart` | `meeting.start(opts?)` | `MeetingStartOptions { title?, expectedSpeakers?, source?, appBundleId?, appName?, expectedRemote? }` → `{ ok, error?, meetingId? }`；`source` 为 `mic`（默认，只用麦克风）/ `mixed`（麦克风 + 应用声音）/ `app`（只用应用声音），`appBundleId` 空 = 全部系统声音，`expectedSpeakers` / `expectedRemote` 为现场 / 线上人数（1～10，`AUTO_SPEAKERS` = 0 为自动，D-042）；未给的项用上次的设置；听写进行中、已有会议或上一场还在整理时拒绝（D-015）；用应用声音但系统低于 14.2、或「录制系统音频」授权框还没回应时拒绝（D-033） |
 | `meetingPause` / `meetingResume` / `meetingStop` | `meeting.pause/resume/stop(opts?)` | 暂停（关闭麦克风）/ 继续 / 结束并整理（重新归类说话人 →（`opts.minutes !== false` 时）生成纪要 → 删除临时录音）（D-019） |
