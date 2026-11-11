@@ -67,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingRemoteSpeakers: 0,
   meetingSaveAudio: false, // D-044：默认只临时保存录音
   meetingAudioDir: '',
+  showMeetingPill: false, // D-049：会议进行中浮动条默认隐藏
   autoCheckUpdates: true
 }
 

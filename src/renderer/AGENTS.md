@@ -15,7 +15,7 @@
 - 订阅主进程状态：`floating-bar/main.ts` 的 `applyState`（`api.session.onStateChanged`）。
 - 设置项读写：`hub/settings.ts` 的 `loadSettingsIntoUi` 与 `btn-save` 处理（`api.settings.get/set`）；即时保存的开关加 `data-autosave="字段名"`。
 - 新增主窗口页面：`index.html` 加 `<section class="page" id="page-xxx">` 与侧栏按钮 `data-page`，在 `hub/main.ts` 的 `PAGES` 与 `route` 里注册加载函数。
-- 列表渲染（防 XSS）：`hub/history.ts` 的 `renderRecord`，用户文本一律 `textContent` 或 `escapeHtml`；纪要 Markdown 用 `src/shared/markdown.ts`（先转义）。
+- 列表渲染（防 XSS）：`hub/history.ts` 的 `renderRecord`，用户文本一律 `textContent` 或 `escapeHtml`；纪要 Markdown 用 `src/shared/markdown.ts`（先转义）；会议图表（D-048）用 mermaid 动态 import 渲染（`securityLevel: 'strict'`，渲染失败按原文显示，`hub/meeting.ts` 的 `renderCharts`）。
 
 ## 不变量
 

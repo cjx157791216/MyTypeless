@@ -2,8 +2,10 @@ import { open, stat } from 'fs/promises'
 import { SAMPLE_RATE } from '../live.ts'
 
 /**
- * 导入录音（D-046）：把 WAV 文件转成会议临时录音的格式（16kHz 单声道 s16le）。支持整数 PCM（8/16/24/32 位）与浮点（32/64 位），
- * 任意采样率、声道数（下混成单声道）；按块读写，几小时的录音也不占用大量内存。纯逻辑（只用 fs），被 test/ 导入。
+ * 导入录音（D-046）：把 WAV / MP3 文件转成会议临时录音的格式（16kHz 单声道 s16le）。
+ * WAV：支持整数 PCM（8/16/24/32 位）与浮点（32/64 位），任意采样率、声道数（下混成单声道）。
+ * MP3：MPEG-1/2/2.5 Layer 1/2/3，用 mpg123-decoder（mpg123 编译成的 WASM）流式解码；时长靠逐帧扫帧头累计，VBR 也准确。
+ * 都按块读写，几小时的录音也不占用大量内存。纯逻辑（只用 fs），被 test/ 导入。
  */
 
 export interface WavInfo {
@@ -198,4 +200,258 @@ export async function convertWav(src: string, dest: string, onProgress?: (done: 
     await out?.close().catch(() => undefined)
     await input.close().catch(() => undefined)
   }
+}
+
+/** 按文件头认格式：WAV（RIFF/WAVE）或 MP3（ID3 标签 / MPEG 帧同步），认不出返回 null */
+export function sniffAudio(head: Buffer): 'wav' | 'mp3' | null {
+  if (head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE') return 'wav'
+  if (head.length >= 3 && head.toString('ascii', 0, 3) === 'ID3') return 'mp3'
+  if (head.length >= 2 && head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return 'mp3'
+  return null
+}
+
+async function audioKind(path: string): Promise<'wav' | 'mp3'> {
+  const f = await open(path, 'r')
+  try {
+    const head = Buffer.alloc(12)
+    const { bytesRead } = await f.read(head, 0, head.length, 0)
+    const kind = sniffAudio(head.subarray(0, bytesRead))
+    if (!kind) throw new Error('不是支持的录音格式（目前支持 .wav 与 .mp3）')
+    return kind
+  } finally {
+    await f.close().catch(() => undefined)
+  }
+}
+
+export interface AudioInfo {
+  kind: 'wav' | 'mp3'
+  /** 时长（毫秒） */
+  durationMs: number
+}
+
+/** 读文件类型与时长；认不出或文件损坏时抛出带说明的错误 */
+export async function readAudioInfo(path: string): Promise<AudioInfo> {
+  const kind = await audioKind(path)
+  if (kind === 'wav') return { kind, durationMs: (await readWavInfo(path)).durationMs }
+  return { kind, durationMs: (await readMp3Info(path)).durationMs }
+}
+
+/** 按块读文件、扫帧头算出的 MP3 信息 */
+export interface Mp3Info extends AudioInfo {
+  /** 第一帧开始的位置（开头的 ID3v2 等标签不算） */
+  dataOffset: number
+  /** 最后一帧结束的位置 */
+  framesEnd: number
+  /** 第一帧的采样率 */
+  rate: number
+  /** 第一帧的声道数 */
+  channels: number
+  /** 按帧头累计的样本总数 */
+  samples: number
+}
+
+interface Mp3Frame {
+  /** 整帧字节数（含帧头，有 CRC 时含 CRC） */
+  len: number
+  samples: number
+  rate: number
+  channels: number
+}
+
+const MP3_RATES: Record<number, readonly number[]> = {
+  3: [44100, 48000, 32000], // MPEG1
+  2: [22050, 24000, 16000], // MPEG2
+  0: [11025, 12000, 8000] // MPEG2.5
+}
+// 层（MPEG 帧头里的层位：1 = Layer III，2 = Layer II，3 = Layer I）→ 各比特率档（kbps），索引 = 帧头的比特率位
+const MP3_BITRATES_V1: Record<number, readonly number[]> = {
+  1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  2: [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+  3: [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448]
+}
+const MP3_BITRATES_V2: Record<number, readonly number[]> = {
+  1: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  3: [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256]
+}
+
+/** 解析 b[i] 起的帧头；不是帧同步、保留的版本 / 层或无效的比特率 / 采样率档时返回 null */
+function parseMp3Frame(b: Buffer, i: number): Mp3Frame | null {
+  if (i + 4 > b.length || b[i] !== 0xff || (b[i + 1] & 0xe0) !== 0xe0) return null
+  const version = (b[i + 1] >> 3) & 3
+  const layer = (b[i + 1] >> 1) & 3
+  const rateIdx = (b[i + 2] >> 2) & 3
+  const rates = MP3_RATES[version]
+  if (!rates || layer === 0 || rateIdx === 3) return null
+  const bitrate = (version === 3 ? MP3_BITRATES_V1 : MP3_BITRATES_V2)[layer][(b[i + 2] >> 4) & 15]
+  if (!bitrate) return null
+  const rate = rates[rateIdx]
+  const pad = (b[i + 2] >> 1) & 1
+  // 帧长 = floor(槽系数 × 比特率 / 采样率) + 填充位；Layer I 槽系数 12、槽 4 字节，Layer II/III 槽系数 144（Layer III 在 MPEG2/2.5 是 72）
+  const slots = layer === 3 ? 12 : layer === 2 || version === 3 ? 144 : 72
+  const len = layer === 3 ? (Math.floor((12 * bitrate * 1000) / rate) + pad) * 4 : Math.floor((slots * bitrate * 1000) / rate) + pad
+  // 每帧样本数：Layer I 384，Layer II 1152，Layer III 在 MPEG1 是 1152、MPEG2/2.5 是 576
+  const samples = layer === 3 ? 384 : layer === 2 || version === 3 ? 1152 : 576
+  return { len, samples, rate, channels: ((b[i + 3] >> 6) & 3) === 3 ? 1 : 2 }
+}
+
+/**
+ * MP3 帧头扫描（纯逻辑）：按帧头逐帧累计样本数得到时长，VBR 也准确；跳过开头的 ID3v2 标签，
+ * 帧间垃圾按字节重同步。分块 push 与一次送入结果相同（不完整的帧留到下一块）。
+ */
+export class Mp3FrameScan {
+  dataOffset = -1
+  framesEnd = 0
+  rate = 0
+  channels = 0
+  samples = 0
+
+  private buf: Buffer = Buffer.alloc(0)
+  private base = 0 // buf[0] 在文件里的绝对位置
+
+  push(chunk: Buffer): void {
+    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk
+    const used = this.scan(false)
+    if (used > 0) {
+      this.base += used
+      this.buf = this.buf.subarray(used)
+    }
+  }
+
+  end(): void {
+    this.scan(true)
+    this.base += this.buf.length
+    this.buf = Buffer.alloc(0)
+  }
+
+  get durationMs(): number {
+    return this.rate ? Math.round((this.samples * 1000) / this.rate) : 0
+  }
+
+  /** 扫描缓冲，返回可丢弃的前缀长度。非 final 时停在不完整帧前，保住帧头等下一块 */
+  private scan(final: boolean): number {
+    const b = this.buf
+    let i = 0
+    // 开头的 ID3v2 标签：10 字节头 + syncsafe 长度（有尾标记再加 10 字节）
+    if (this.base === 0 && b.length >= 3 && b.toString('ascii', 0, 3) === 'ID3') {
+      if (b.length < 10) return final ? b.length : 0
+      const size = ((b[6] & 0x7f) << 21) | ((b[7] & 0x7f) << 14) | ((b[8] & 0x7f) << 7) | (b[9] & 0x7f)
+      const skip = 10 + size + (b[5] & 0x10 ? 10 : 0)
+      if (b.length < skip) return final ? b.length : 0
+      i = skip
+    }
+    while (i < b.length) {
+      if (b[i] === 0xff) {
+        const frame = i + 4 <= b.length ? parseMp3Frame(b, i) : null
+        if (frame) {
+          if (i + frame.len > b.length && !final) break // 帧还没到齐：保住帧头等下一块
+          if (!this.rate) {
+            this.rate = frame.rate
+            this.channels = frame.channels
+            this.dataOffset = this.base + i
+          }
+          this.samples += frame.samples
+          this.framesEnd = this.base + i + frame.len
+          i += frame.len
+          continue
+        }
+        // 帧头还没到齐（不足 4 字节）：等下一块
+        if (!final && i + 4 > b.length) break
+      }
+      i++ // 假同步：按字节重同步
+    }
+    return final ? b.length : i
+  }
+}
+
+const MP3_SCAN_BLOCK = 1 << 20
+
+/** 块读 MP3、逐帧扫帧头；一帧都没有时抛错（文件可能损坏） */
+export async function readMp3Info(path: string): Promise<Mp3Info> {
+  const size = (await stat(path)).size
+  const f = await open(path, 'r')
+  try {
+    const scan = new Mp3FrameScan()
+    const buf = Buffer.alloc(Math.min(MP3_SCAN_BLOCK, size))
+    for (let pos = 0; pos < size; ) {
+      const { bytesRead } = await f.read(buf, 0, buf.length, pos)
+      if (!bytesRead) break
+      pos += bytesRead
+      scan.push(buf.subarray(0, bytesRead))
+    }
+    scan.end()
+    if (!scan.rate) throw new Error('不是有效的 MP3 文件（文件可能损坏）')
+    return {
+      kind: 'mp3',
+      durationMs: scan.durationMs,
+      dataOffset: scan.dataOffset,
+      framesEnd: scan.framesEnd,
+      rate: scan.rate,
+      channels: scan.channels,
+      samples: scan.samples
+    }
+  } finally {
+    await f.close().catch(() => undefined)
+  }
+}
+
+/** 多声道解码结果 → 单声道 float（各声道取平均） */
+function mixToMono(channels: readonly Float32Array[]): Float32Array {
+  if (channels.length === 1) return channels[0]
+  const out = new Float32Array(channels[0].length)
+  for (let i = 0; i < out.length; i++) {
+    let s = 0
+    for (const ch of channels) s += ch[i]
+    out[i] = s / channels.length
+  }
+  return out
+}
+
+const MP3_DECODE_BLOCK = 1 << 18
+
+/**
+ * 把 MP3 转成 16kHz 单声道 s16le 写到 dest（覆盖）；返回写入的样本数。
+ * mpg123（WASM）是流式解码器，decode 接受任意大小的数据、跨块的不完整帧内部缓存；解码出的浮点样本下混、重采样后写盘
+ */
+export async function convertMp3(src: string, dest: string, onProgress?: (done: number, total: number) => void): Promise<number> {
+  const size = (await stat(src)).size
+  const { MPEGDecoder } = await import('mpg123-decoder')
+  const decoder = new MPEGDecoder()
+  await decoder.ready
+  const input = await open(src, 'r')
+  let out: Awaited<ReturnType<typeof open>> | null = null
+  let written = 0
+  let resampler: Resampler | null = null
+  let rate = 0
+  try {
+    out = await open(dest, 'w')
+    const buf = Buffer.alloc(Math.min(MP3_DECODE_BLOCK, size))
+    for (let done = 0; done < size; ) {
+      const { bytesRead } = await input.read(buf, 0, buf.length, done)
+      if (!bytesRead) break
+      done += bytesRead
+      const r = decoder.decode(buf.subarray(0, bytesRead))
+      if (r.samplesDecoded) {
+        if (r.sampleRate !== rate) {
+          rate = r.sampleRate
+          resampler = new Resampler(rate)
+        }
+        const pcm = resampler!.process(mixToMono(r.channelData))
+        if (pcm.length) await out.write(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength))
+        written += pcm.length
+      }
+      onProgress?.(done, size)
+    }
+    return written
+  } finally {
+    decoder.free()
+    await out?.close().catch(() => undefined)
+    await input.close().catch(() => undefined)
+  }
+}
+
+/** 导入录音的统一入口：按文件头分发到 WAV / MP3 的转换 */
+export async function convertAudio(src: string, dest: string, onProgress?: (done: number, total: number) => void): Promise<number> {
+  if ((await audioKind(src)) === 'wav') return convertWav(src, dest, onProgress)
+  return convertMp3(src, dest, onProgress)
 }

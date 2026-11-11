@@ -111,5 +111,3 @@ html, body {
 .pill.meeting-paused .icon.meeting-btn .i-play { display: block; }
 .pill.meeting-paused .icon.meeting-btn .i-pause { display: none; }
 .pill.meeting-paused .rec-dot { animation: none; background: #ffd27a; }
-.pill.meeting-processing .rec-dot, .pill.meeting-processing .icon.meeting-btn { display: none; }
-.pill.meeting-processing { padding: 0 14px; }

@@ -389,23 +389,19 @@ function fmtClock(ms: number): string {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
-/** 听写会话空闲时，胶囊显示会议状态 */
+/** 听写会话空闲时，胶囊显示会议状态：默认隐藏（D-049），设置 showMeetingPill 开启时显示；整理中的步骤不再上胶囊 */
 function renderMeeting(): void {
   const m = meetingLive
-  const show = currentState === 'idle' && m.state !== 'idle'
+  const show = currentState === 'idle' && m.showPill === true
   pill.classList.toggle('state-meeting', show)
   pill.classList.toggle('meeting-paused', show && m.state === 'paused')
-  pill.classList.toggle('meeting-processing', show && m.state === 'processing')
   if (!show) {
     if (currentState === 'idle') pill.classList.add('state-idle')
     return
   }
   pill.classList.remove('state-idle')
-  if (m.state === 'processing') meetingTimeEl.textContent = m.stage ?? '正在整理会议纪要…'
-  else {
-    const elapsed = (m.elapsedMs ?? 0) + (m.running ? Date.now() - meetingLiveAt : 0)
-    meetingTimeEl.textContent = `${m.state === 'paused' ? '已暂停' : '会议中'} ${fmtClock(elapsed)}`
-  }
+  const elapsed = (m.elapsedMs ?? 0) + (m.running ? Date.now() - meetingLiveAt : 0)
+  meetingTimeEl.textContent = `${m.state === 'paused' ? '已暂停' : '会议中'} ${fmtClock(elapsed)}`
   btnMeetingPause.title = m.state === 'paused' ? '继续' : '暂停'
 }
 

@@ -223,6 +223,7 @@
 
               <div class="tabs" id="meeting-tabs">
                 <button data-tab="minutes">纪要</button>
+                <button data-tab="charts" class="hidden">图表</button>
                 <button data-tab="transcript">转写</button>
                 <button data-tab="speakers">说话人</button>
               </div>
@@ -247,6 +248,11 @@
                     <button id="btn-minutes-cancel" class="btn">取消</button>
                   </div>
                 </div>
+              </div>
+
+              <div class="tab-panel" data-tab="charts">
+                <div class="hint">从纪要内容里分析生成的图表（流程、架构、时序等）；「重新生成」纪要时会一并重新生成。</div>
+                <div id="charts-list"></div>
               </div>
 
               <div class="tab-panel" data-tab="transcript">
@@ -415,9 +421,13 @@
             </div>
           </div>
 
-          <!-- 保存会议录音（D-044）：默认关；勾选时选文件夹 -->
+          <!-- 会议（D-049 浮动条开关、D-044 保存录音） -->
           <div class="settings-group" id="settings-meeting-audio">
-            <h2>会议录音</h2>
+            <h2>会议</h2>
+            <div class="card">
+              <label class="check"><input id="meeting-show-pill" type="checkbox" /> 会议进行中在浮动条显示「会议中 hh:mm:ss」与暂停、结束按钮</label>
+              <div class="hint">默认隐藏；结束、暂停会议在会议页或托盘进行，整理中浮动条不显示进度。</div>
+            </div>
             <div class="card">
               <label class="check"><input id="meeting-save-audio" type="checkbox" /> 保存会议录音：每场会议结束后，把录音存成 WAV 文件放到指定的文件夹</label>
               <div class="model-head hidden" id="meeting-audio-dir-row">

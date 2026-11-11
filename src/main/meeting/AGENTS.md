@@ -8,13 +8,13 @@
 | `segmenter.ts` | 按停顿分句 `UtteranceSegmenter`、两路对齐、句内换人切分、慢电脑降级判定 `denoiseLagging` / `overloaded`（纯逻辑） |
 | `cluster.ts` | 说话人聚类（平均链接；按人数或自动人数 `regroup`）与声纹匹配 `printScore`（纯逻辑） |
 | `background.ts` | 声纹认人用的背景声音 `SPEAKER_BACKGROUND`（随声纹模型固定的常量，D-042） |
-| `minutes.ts` | 转写稿、纪要提示词、长会议纪要编排 `generateMinutesBody`（均分、并发、逐层合并、断点续做）（纯逻辑） |
+| `minutes.ts` | 转写稿、纪要提示词、长会议纪要编排 `generateMinutesBody`（均分、并发、逐层合并、断点续做）、图表提示词与解析 `generateDiagrams` / `parseDiagrams`（D-048，纯逻辑） |
 | `echo.ts` / `enhance.ts` | 外放回声去除 / 识别前音量归一 `normalizeLoudness`（纯逻辑） |
 | `call-apps.ts` | 线上会议可选应用分类：通话软件 / 浏览器 / 其他（D-039，纯逻辑） |
 | `app-audio.ts` | 线上会议的应用声音：`mt-audiotap` 进程、应用列表、开会前授权 `prepareAppAudio`（D-033） |
 | `diarizer.ts` | 声纹 / 分段 / 降噪模型下载与 `mt-diarize` 进程 |
 | `recording.ts` | 保存会议录音（D-044）：临时录音按块混成一个 WAV `saveRecording`、文件名 `recordingFileName` 与反解 `parseRecordingFileName`（纯逻辑，只用 fs） |
-| `import-audio.ts` | 导入录音（D-046）：WAV 解析、下混、重采样到 16kHz 单声道 `convertWav`（纯逻辑，只用 fs） |
+| `import-audio.ts` | 导入录音（D-046）：WAV / MP3 解析、下混、重采样到 16kHz 单声道 `convertAudio`（纯逻辑，只用 fs；MP3 帧头扫描算时长 `Mp3FrameScan`，解码用 mpg123 的 WASM（`mpg123-decoder` 动态 import，打进主进程产物）） |
 | `store.ts` | 会议、说话人、句子、声纹的 sqlite 存储 |
 
 纯逻辑模块被 `test/` 导入：不能 import `electron`、不能用 TS 参数属性，互相导入写 `.ts` 扩展名。

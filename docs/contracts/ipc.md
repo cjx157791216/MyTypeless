@@ -51,7 +51,7 @@
 | `meetingExport` | `meeting.exportMarkdown(id, part)` | 保存对话框；`part` 为 `'minutes' | 'transcript'`，纪要与完整转写稿分别导出（文件名带「纪要 / 转写」后缀）→ `boolean` |
 | `meetingAudioDir` | `meeting.audioDir(action)` | 会议录音的保存文件夹（D-044）：`pick` 弹出选择框并写入设置 `meetingAudioDir` → 选定的路径，取消为 `null`；`open` 在文件管理器里打开 → 路径，文件夹不存在为 `null` |
 | `meetingRevealAudio` | `meeting.revealAudio(id)` | 在文件管理器里选中这场会议保存的录音 → `boolean`（没保存或文件已不在为 `false`） |
-| `meetingImport` | `meeting.importRecording(opts?)` | 导入录音（D-046）：`{ expectedSpeakers?, minutes? }`；弹出选择框选一个 WAV（默认打开会议录音的保存文件夹），读完文件头、建好会议即返回 `{ ok, error?, meetingId?, canceled? }`（取消选择为 `canceled: true`），之后在后台转写与整理（进度经 `meetingLive` 的 `processing` 推送）；会议进行中、有会议正在整理、文件不是支持的 WAV、内置识别模型未下载时拒绝 |
+| `meetingImport` | `meeting.importRecording(opts?)` | 导入录音（D-046）：`{ expectedSpeakers?, minutes? }`；弹出选择框选一个 WAV / MP3（默认打开会议录音的保存文件夹），读完文件头、建好会议即返回 `{ ok, error?, meetingId?, canceled? }`（取消选择为 `canceled: true`），之后在后台转写与整理（进度经 `meetingLive` 的 `processing` 推送）；会议进行中、有会议正在整理、文件不是支持的录音格式、内置识别模型未下载时拒绝 |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |
 | `voiceprintList` / `voiceprintRename` / `voiceprintDelete` | `voiceprints.list/rename/remove` | → 最新 `Voiceprint[]`；改名同步到关联的说话人，删除立即生效（D-016） |
 | `styleSampleList` / `styleSampleDelete` / `styleSampleClear` | `styleSamples.list/remove/clear` | → 最新 `StyleSample[]`（从新到旧）；删除、清空立即生效（D-041） |
@@ -71,7 +71,7 @@
 | `captureFlush` | `session.onFlush` | 无载荷；浮动条必须冲刷 worklet 后调用 `audioFinal`（主进程最多等 700ms） |
 | `answerCardUpdate` | `session.onAnswer` | `AnswerPayload { question, answer, pending?, error? }`，只发给回答浮卡，且在页面加载完成后发送 |
 | `navigate` | `system.onNavigate` | 页面锚点：`#home`、`#history`、`#dict`、`#settings`、`#settings/about`（滚动到「关于」）、`#meeting`、`#meeting/<id>`（D-017） |
-| `meetingLive` | `meeting.onLive` | `MeetingLive { state: idle/recording/paused/processing, meetingId?, title?, elapsedMs?, running?, stage?, notice?, speakerModel?, speakerModelProgress? }`，广播到所有窗口；会议进行或整理中浮动条保持显示 |
+| `meetingLive` | `meeting.onLive` | `MeetingLive { state: idle/recording/paused/processing, meetingId?, title?, elapsedMs?, running?, stage?, showPill?, notice?, speakerModel?, speakerModelProgress? }`，广播到所有窗口；会议进行或整理中浮动条窗口保持显示；`showPill` 按设置 `showMeetingPill` 算好（会议中胶囊默认隐藏，D-049） |
 | `meetingChanged` | `meeting.onChanged` | 某场会议的内容有变化（`meetingId`），主窗口重新读取 |
 | `meetingCapture` | `meeting.onCapture` | 发给浮动条：`{ on, micDeviceId }`，开/关会议录音（与听写共用麦克风管线，会议结束立即释放麦克风） |
 | `dictChanged` | `dict.onChanged` | 自动学习收录了新词（`string[]`），主窗口刷新词典 |

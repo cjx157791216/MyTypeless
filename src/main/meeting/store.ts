@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { database } from '../history'
-import type { MeetingDetail, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingStatus, MeetingSummary, MeetingTrack, Voiceprint } from '../../shared/types'
+import type { MeetingDetail, MeetingDiagram, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingStatus, MeetingSummary, MeetingTrack, Voiceprint } from '../../shared/types'
 import { SAMPLE_RATE } from '../live'
 import { EMBED_MODEL } from './cluster'
 
@@ -40,6 +40,7 @@ export interface MeetingRow {
   app_name: string | null
   expected_remote: number | null // 线上人数
   saved_audio_path: string | null // 保存下来的会议录音（D-044，用户的文件，删除会议时不删）
+  diagrams: string | null // 内容分析生成的图表（D-048），JSON 数组 [{ title, code }]；没有为 NULL
 }
 
 export interface SpeakerRow {
@@ -110,6 +111,7 @@ export function updateMeeting(
     savedAudioPath: string | null
     source: MeetingSource
     expectedSpeakers: number | null
+    diagrams: string | null
   }>
 ): void {
   const cols: Record<string, string> = {
@@ -123,7 +125,8 @@ export function updateMeeting(
     appAudioPath: 'app_audio_path',
     savedAudioPath: 'saved_audio_path',
     source: 'source',
-    expectedSpeakers: 'expected_speakers'
+    expectedSpeakers: 'expected_speakers',
+    diagrams: 'diagrams'
   }
   const keys = Object.keys(patch).filter((k) => k in cols)
   if (!keys.length) return
@@ -175,6 +178,26 @@ export function listMeetings(): MeetingSummary[] {
   }))
 }
 
+/** 解析会议图表（D-048）：存的是 JSON 数组 [{ title, code }]；坏数据按没有图表处理 */
+function parseDiagramsJson(json: string | null | undefined): MeetingDiagram[] {
+  if (!json) return []
+  try {
+    const arr: unknown = JSON.parse(json)
+    if (!Array.isArray(arr)) return []
+    const out: MeetingDiagram[] = []
+    for (const item of arr) {
+      if (!item || typeof item !== 'object') continue
+      const code = (item as { code?: unknown }).code
+      if (typeof code !== 'string') continue
+      const title = (item as { title?: unknown }).title
+      out.push({ title: typeof title === 'string' && title.trim() ? title.trim() : '图表', code })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 export function getMeetingDetail(id: string): MeetingDetail | null {
   const r = getMeetingRow(id)
   if (!r) return null
@@ -218,7 +241,8 @@ export function getMeetingDetail(id: string): MeetingDetail | null {
     segments: segs,
     minutes: r.minutes,
     minutesError: r.minutes_error,
-    savedAudioPath: r.saved_audio_path ?? null
+    savedAudioPath: r.saved_audio_path ?? null,
+    diagrams: parseDiagramsJson(r.diagrams)
   }
 }
 

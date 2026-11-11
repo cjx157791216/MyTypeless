@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { Resampler, convertWav, decodeFrames, parseWavHeader, readWavInfo } from '../src/main/meeting/import-audio.ts'
+import { Mp3FrameScan, Resampler, convertAudio, convertWav, decodeFrames, parseWavHeader, readAudioInfo, readMp3Info, readWavInfo } from '../src/main/meeting/import-audio.ts'
 import { wavHeader } from '../src/main/wav.ts'
 
-// 导入录音（D-046）：WAV 解析、下混、重采样到 16kHz 单声道
+// 导入录音（D-046）：WAV / MP3 解析、下混、重采样到 16kHz 单声道
 
 const SR = 16000
 
@@ -147,4 +147,113 @@ test('转换：不是 WAV 时报错', async () => {
   const src = join(dir, 'x.wav')
   writeFileSync(src, 'hello')
   await assert.rejects(convertWav(src, join(dir, 'x.pcm')), /不是 WAV/)
+})
+
+test('MP3 帧扫描：各版本帧长公式、声道数', () => {
+  // [版本字节 b1, 比特率字节 b2, 帧长, 每帧样本数, 采样率]
+  for (const [b1, b2, len, samples, rate] of [
+    [0xfb, 0x90, 417, 1152, 44100], // MPEG1 L3：144×128k/44100（b2 idx9 = 128k，rate idx0 = 44100）
+    [0xfd, 0x90, 522, 1152, 44100], // MPEG1 L2：144×160k/44100（b2 idx9 = 160k）
+    [0xff, 0x90, 312, 384, 44100], // MPEG1 L1：(12×288k/44100)×4（b2 idx9 = 288k）
+    [0xf3, 0x40, 104, 576, 22050], // MPEG2 L3：72×32k/22050（b2 idx4 = 32k，rate idx0 = 22050）
+    [0xe3, 0x38, 216, 576, 8000] // MPEG2.5 L3：72×24k/8000
+  ] as const) {
+    const frame = Buffer.concat([Buffer.from([0xff, b1, b2, 0x00]), Buffer.alloc(len - 4)])
+    const s = new Mp3FrameScan()
+    s.push(frame)
+    s.end()
+    assert.equal(s.samples, samples, `b1=${b1.toString(16)}`)
+    assert.equal(s.rate, rate)
+    assert.equal(s.channels, 2)
+    assert.equal(s.dataOffset, 0)
+    assert.equal(s.framesEnd, len)
+    const mono = Buffer.from([0xff, b1, b2, 0xc0])
+    const sm = new Mp3FrameScan()
+    sm.push(mono)
+    sm.end()
+    assert.equal(sm.channels, 1)
+  }
+})
+
+test('MP3 帧扫描：跳过 ID3 与垃圾、填充位改变帧长、分块送入与一次送入相同', () => {
+  const id3 = Buffer.alloc(20)
+  id3.write('ID3', 0, 'ascii')
+  id3[6] = 0 // 标签体 10 字节（syncsafe），总共跳 20
+  id3[9] = 10
+  const garbage = Buffer.from([0x12, 0x34, 0x56, 0x78, 0x9a, 0x00, 0x21, 0x43, 0x65, 0x87, 0xa9, 0x00, 0x11])
+  const frame = (pad: boolean) => Buffer.concat([Buffer.from([0xff, 0xfb, pad ? 0x92 : 0x90, 0x00]), Buffer.alloc((pad ? 418 : 417) - 4)])
+  const whole = Buffer.concat([id3, garbage, frame(false), frame(true), frame(false)])
+  const s = new Mp3FrameScan()
+  s.push(whole)
+  s.end()
+  assert.equal(s.dataOffset, 33)
+  assert.equal(s.framesEnd, whole.length)
+  assert.equal(s.samples, 3 * 1152)
+  assert.equal(s.rate, 44100)
+  assert.deepEqual(Math.round((s.samples * 1000) / s.rate), 78)
+  const chunked = new Mp3FrameScan()
+  for (let off = 0; off < whole.length; off += 7) chunked.push(whole.subarray(off, off + 7))
+  chunked.end()
+  assert.deepEqual([chunked.dataOffset, chunked.framesEnd, chunked.samples, chunked.rate], [s.dataOffset, s.framesEnd, s.samples, s.rate])
+  // 最后一帧不完整：end() 时也计入（时长按声明的帧长算，误差 ≤1 帧）
+  const cut = new Mp3FrameScan()
+  cut.push(whole.subarray(0, whole.length - 5))
+  cut.end()
+  assert.equal(cut.samples, 3 * 1152)
+  assert.equal(cut.framesEnd, whole.length)
+})
+
+test('MP3 帧扫描：保留版本 / 保留层 / 无效比特率 / 无效采样率不算帧', () => {
+  for (const [b1, b2] of [[0xeb, 0x90], [0xf9, 0x90], [0xfb, 0xf0], [0xfb, 0x9c]] as const) {
+    const s = new Mp3FrameScan()
+    s.push(Buffer.from([0xff, b1, b2, 0x00, 0, 0, 0, 0]))
+    s.end()
+    assert.equal(s.rate, 0, `b1=${b1.toString(16)} b2=${b2.toString(16)}`)
+  }
+})
+
+test('MP3：读时长与转码（44.1kHz 立体声、8kHz 单声道 MPEG-2.5），不是 MP3 时报错', async () => {
+  const dir = tmp()
+  const src44 = join(import.meta.dirname, 'fixtures', 'import-audio-44k.mp3')
+  const info = await readAudioInfo(src44)
+  assert.equal(info.kind, 'mp3')
+  assert.ok(Math.abs(info.durationMs - 3000) <= 150, `${info.durationMs} ms`)
+  const dest = join(dir, 'a.pcm')
+  const progress: number[] = []
+  const n = await convertAudio(src44, dest, (done, all) => progress.push(done / all))
+  const out = readPcm(dest)
+  assert.equal(out.length, n)
+  assert.ok(Math.abs(n - SR * 3) <= 100, `${n} 个样本`)
+  assert.ok(Math.abs(amplitude(out.subarray(SR, SR * 2), 440) - 0.5) < 0.05, '440Hz 幅度保持')
+  assert.equal(progress.at(-1), 1)
+
+  const src8 = join(import.meta.dirname, 'fixtures', 'import-audio-8k.mp3')
+  const info8 = await readMp3Info(src8)
+  assert.equal(info8.rate, 8000)
+  assert.equal(info8.channels, 1)
+  // 帧头数出的时长含 LAME 的编码器延迟与尾部填充帧（约 0.2s）；解码时经 gapless 裁剪，所以转码长度是准的
+  assert.ok(Math.abs(info8.durationMs - 2000) <= 300, `${info8.durationMs} ms`)
+  const n8 = await convertAudio(src8, join(dir, 'b.pcm'))
+  const out8 = readPcm(join(dir, 'b.pcm'))
+  assert.equal(out8.length, n8)
+  assert.ok(Math.abs(n8 - SR * 2) <= 100, `${n8} 个样本`)
+  assert.ok(Math.abs(amplitude(out8.subarray(SR, SR * 1.5), 500) - 0.5) < 0.05, '500Hz 幅度保持')
+
+  const fake = join(dir, 'fake.mp3')
+  writeFileSync(fake, 'ID3 no frames at all here')
+  await assert.rejects(readAudioInfo(fake), /不是有效的 MP3/)
+  const junk = join(dir, 'junk.dat')
+  writeFileSync(junk, 'hello world, not audio')
+  await assert.rejects(convertAudio(junk, join(dir, 'junk.pcm')), /不是支持的录音格式/)
+})
+
+test('转换入口：WAV 经 convertAudio 结果不变、读出类型与时长', async () => {
+  const dir = tmp()
+  const pcm = Int16Array.from({ length: SR }, (_, i) => ((i * 89) % 20000) - 10000)
+  const src = join(dir, 'a.wav')
+  writeFileSync(src, Buffer.concat([wavHeader(pcm.length * 2), Buffer.from(pcm.buffer)]))
+  assert.equal(await convertAudio(src, join(dir, 'a.pcm')), pcm.length)
+  assert.deepEqual(readPcm(join(dir, 'a.pcm')), pcm)
+  const info = await readAudioInfo(src)
+  assert.deepEqual({ kind: info.kind, durationMs: info.durationMs }, { kind: 'wav', durationMs: 1000 })
 })

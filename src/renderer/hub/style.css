@@ -375,3 +375,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .update-badge { margin: 6px 10px 0; padding: 3px 8px; border: none; border-radius: 6px; background: var(--accent); color: #fff; font-size: 11px; cursor: pointer; justify-self: start; text-align: left; }
 .update-badge.hidden { display: none; }
 .speaker-bar .count-select { font-size: 12px; padding: 2px 6px; border-radius: 6px; }
+
+/* 会议图表（D-048）：纪要内容分析生成的 Mermaid 图 */
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.chart-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; }
+.chart-body { overflow-x: auto; }
+.chart-body svg { max-width: 100%; height: auto; }
+.chart-body .chart-code { white-space: pre-wrap; font-size: 12px; color: var(--muted); margin: 0; }

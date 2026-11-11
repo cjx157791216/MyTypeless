@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { ALIGN_TOLERANCE, DENOISE_MAX_LAG, MEETING_VAD, MEETING_VAD_DENOISED, UtteranceSegmenter, alignPad, denoiseLagging, overloaded, planFeed, samplesToMs, snapCuts, splitByTurns, turnsInUtterance } from '../src/main/meeting/segmenter.ts'
 import { readFileSync } from 'node:fs'
 import { AUTO_SPEAKERS, OnlineClusterer, regroup, identifySpeakers, printScore, splitByWindows, blendVoiceprint, cosine, normalize, mergeAdjacentParts, type ClusterItem } from '../src/main/meeting/cluster.ts'
-import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown, generateMinutesBody, chunkNotesSystemPrompt, mergeNotesSystemPrompt } from '../src/main/meeting/minutes.ts'
+import { buildTranscript, chunkTranscript, formatClock, formatDuration, minutesHeader, cleanMinutesBody, exportMarkdown, generateDiagrams, generateMinutesBody, parseDiagrams, chunkNotesSystemPrompt, mergeNotesSystemPrompt } from '../src/main/meeting/minutes.ts'
 import { renderMarkdown } from '../src/shared/markdown.ts'
 import { normalizeLoudness } from '../src/main/meeting/enhance.ts'
 
@@ -646,4 +646,53 @@ test('generateMinutesBody：失败后重试只补没完成的段；遇到 429 �
   const limited = fakeModel({ fail: (c, n) => (c.kind === 'minutes' && n === 1 ? new Error('LLM_HTTP_429: too many requests') : null) })
   assert.equal(await generateMinutesBody([line(1)], [], { complete: limited.complete, retryDelaysMs: [1] }), '## 决议\n- 无')
   assert.equal(limited.calls.length, 2)
+})
+
+// —— 图表（D-048）——
+
+test('parseDiagrams：标题 + mermaid 围栏、无标题兜底、识别不出的块丢弃、NONE 为空、最多 3 张', () => {
+  const one = parseDiagrams(
+    [
+      '### 报销流程',
+      '```mermaid',
+      'flowchart TD',
+      '  A[提交] --> B[审批]',
+      '```',
+      '',
+      '### 系统调用',
+      '```mermaid',
+      'sequenceDiagram',
+      '  A->>B: 请求',
+      '```',
+      '分析完毕。'
+    ].join('\n')
+  )
+  assert.deepEqual(one.map((d) => [d.title, d.code.split('\n')[0]]), [
+    ['报销流程', 'flowchart TD'],
+    ['系统调用', 'sequenceDiagram']
+  ])
+  // 标题与围栏之间隔一个空行也认
+  assert.equal(parseDiagrams('### t\n\n```mermaid\npie title a\n```')[0].title, 't')
+  // 没有标题的围栏兜底命名
+  assert.deepEqual(parseDiagrams('```mermaid\ngantt\n今天 :a, 1d\n```').map((d) => d.title), ['图表 1'])
+  // 第一行不是认识的图类型的丢弃；不是 mermaid 围栏的不管
+  assert.deepEqual(parseDiagrams('```mermaid\n这是说明文字\n```'), [])
+  assert.deepEqual(parseDiagrams('```js\nflowchart TD\n```'), [])
+  assert.deepEqual(parseDiagrams('NONE'), [])
+  assert.deepEqual(parseDiagrams(''), [])
+  // 超过上限截断
+  const many = parseDiagrams(Array.from({ length: 5 }, (_, i) => `### 图${i}\n\`\`\`mermaid\nflowchart TD\n\`\`\``).join('\n'))
+  assert.equal(many.length, 3)
+})
+
+test('generateDiagrams：从纪要提炼图表；模型输出 NONE 时为空', async () => {
+  const calls: Array<[string, string]> = []
+  const charts = '### 流程\n```mermaid\nflowchart TD\n  A[需求] --> B[上线]\n```'
+  const out = await generateDiagrams('# 会议\n- 讨论了流程', {
+    complete: async (system, user) => (calls.push([system, user]), charts)
+  })
+  assert.deepEqual(out, [{ title: '流程', code: 'flowchart TD\n  A[需求] --> B[上线]' }])
+  assert.match(calls[0][0], /会议内容分析/)
+  assert.match(calls[0][1], /<transcript>/)
+  assert.deepEqual(await generateDiagrams('纪要', { complete: async () => 'NONE' }), [])
 })

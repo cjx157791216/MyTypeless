@@ -8,6 +8,7 @@ MyTypeless 的安装包随附以下第三方组件编译的程序；语音模型
 | sherpa-onnx | 会议声纹助手 `mt-diarize` | Apache-2.0 | https://github.com/k2-fsa/sherpa-onnx |
 | electron-updater | 在线更新（D-028） | MIT | https://github.com/electron-userland/electron-builder |
 | ONNX Runtime | `mt-diarize` 的推理库（静态链接） | MIT | https://github.com/microsoft/onnxruntime |
+| mpg123-decoder（内含 mpg123） | 导入 MP3 录音时的解码（WASM，打进主进程，D-046） | MIT / LGPL-2.1 | https://github.com/eshaz/wasm-audio-decoders · https://mpg123.org |
 
 应用内下载的模型（不随包分发）：Whisper large-v3-turbo 等 ggml 模型（MIT，OpenAI / ggml-org）；3D-Speaker ERes2NetV2 中文声纹模型（Apache-2.0，modelscope/3D-Speaker，经 sherpa-onnx 导出）；pyannote segmentation 3.0（MIT，pyannote/pyannote-audio，经 sherpa-onnx 导出）；GTCRN 语音降噪模型（MIT，Xiaobin Rong / GTCRN，经 sherpa-onnx 导出）；FireRedASR2-AED 语音识别模型（Apache-2.0，FireRedTeam，经 sherpa-onnx 导出并量化）；CT-Transformer 中英文标点模型（Apache-2.0，阿里巴巴 FunASR / iic/punc_ct-transformer_zh-cn-common-vocab272727，经 sherpa-onnx 导出并量化）。
 
@@ -271,3 +272,37 @@ SOFTWARE.
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## mpg123-decoder — MIT License
+
+导入 MP3 录音时使用的 WASM 解码封装（打进主进程产物）。
+
+```
+Copyright 2021-2025 Ethan Halsall
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## mpg123 — GNU Lesser General Public License v2.1
+
+mpg123-decoder 内嵌的 WASM 解码器由 mpg123 编译。mpg123 依据 GNU Lesser General
+Public License v2.1（LGPL-2.1）发布，版权归 Michael Hipp 与 mpg123 项目所有。
+完整许可证文本见 https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html ，
+源代码见 https://mpg123.org ；本应用以库方式使用它，未修改其源代码，
+源代码可从上述地址获取。
