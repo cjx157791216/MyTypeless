@@ -16,6 +16,8 @@ extraResources:
   - from: build/THIRD_PARTY_NOTICES.md
     to: THIRD_PARTY_NOTICES.md
 mac:
+  # Swift 助手与 mt-whisper / mt-diarize 都按 macOS 13.0 部署目标编译（scripts/build-native.sh），声明与实际一致（issue #59）
+  minimumSystemVersion: 13.0
   extraResources:
     - from: native/bin
       to: bin

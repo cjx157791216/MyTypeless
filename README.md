@@ -54,7 +54,7 @@ macOS 与 Windows 上的 AI 语音听写工具：**按住快捷键说话，松�
 
 | | macOS | Windows |
 | --- | --- | --- |
-| 系统要求 | Apple Silicon | Windows 10/11 x64 |
+| 系统要求 | Apple Silicon，macOS 13+（线上会议截声需 14.2+） | Windows 10/11 x64 |
 | Whisper 识别（中文、英文以外的语言） | 使用 GPU | 只用 CPU，较慢 |
 | 线上会议截取会议软件的声音 | macOS 14.2 及以上 | Windows 11 |
 

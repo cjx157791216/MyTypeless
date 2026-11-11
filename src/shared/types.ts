@@ -329,6 +329,7 @@ export const IPC = {
   updateCancel: 'mt:update-cancel', // 取消下载
   updateInstall: 'mt:update-install', // 重启并安装（会议或听写进行中时拒绝）
   updateOpenDownload: 'mt:update-open-download', // 用浏览器打开安装包下载地址（自动安装失败时）
+  updateOpenReleases: 'mt:update-open-releases', // 用浏览器打开 GitHub Releases 页面（设置 → 关于 的「官方下载」链接）
   updateState: 'mt:update-state', // main → hub：UpdateState
 
   // 会议模式（D-015）

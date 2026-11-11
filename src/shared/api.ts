@@ -143,6 +143,8 @@ export interface MyTypelessBridge {
     /** 重启并安装；会议或听写进行中时返回 { ok: false, error } */
     install(): Promise<{ ok: boolean; error?: string }>
     openDownload(): Promise<void>
+    /** 用浏览器打开 GitHub Releases 页面（设置 → 关于 的「官方下载」链接） */
+    openReleases(): Promise<void>
     onState(cb: (s: UpdateState) => void): () => void
   }
 }

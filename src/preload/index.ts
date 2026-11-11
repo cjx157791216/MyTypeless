@@ -140,6 +140,7 @@ const api = {
     cancel: () => ipcRenderer.invoke(IPC.updateCancel),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     openDownload: () => ipcRenderer.invoke(IPC.updateOpenDownload),
+    openReleases: () => ipcRenderer.invoke(IPC.updateOpenReleases),
     onState: (cb: (s: unknown) => void) => {
       const listener = (_e: unknown, s: unknown) => cb(s)
       ipcRenderer.on(IPC.updateState, listener)
