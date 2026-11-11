@@ -1,7 +1,7 @@
 {
   "name": "mytypeless",
   "productName": "MyTypeless",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "macOS 与 Windows 上的 AI 语音听写工具：按住快捷键说话，润色好的文字写入光标处；本地识别、自带 API Key、数据只存本地",
   "main": "./out/main/index.js",
   "private": true,
@@ -36,6 +36,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "mermaid": "^12.3.0",
+    "mpg123-decoder": "^1.0.3"
   }
 }
