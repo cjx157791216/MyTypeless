@@ -272,6 +272,33 @@ function winRunTitle(tag) {
   return `Windows 安装包 ${tag}`
 }
 
+/** 上传失败后的重试间隔（毫秒）：弱网下大文件常被 GitHub 掐断（HTTP 408 Upload body timed out） */
+const UPLOAD_RETRY_MS = [10_000, 30_000, 60_000]
+
+/** 删掉草稿里的同名资产：上传被服务端掐断时 GitHub 会留下不完整的资产条目，重传同名会 422 already_exists */
+async function deleteAssetByName(token, repo, relId, name, ghFn = gh) {
+  for (const a of await ghFn(token, 'GET', `/repos/${repo}/releases/${relId}/assets?per_page=100`)) {
+    if (a.name === name) await ghFn(token, 'DELETE', `/repos/${repo}/releases/${relId}/assets/${a.id}`)
+  }
+}
+
+/** 上传一个文件到草稿 Release：失败时先清理同名残骸资产，再按 UPLOAD_RETRY_MS 退避重试（ghFn / readBlob / retryMs 可注入供测试） */
+async function uploadAsset(token, repo, relId, uploadBase, file, { ghFn = gh, readBlob = (f) => openAsBlob(f), retryMs = UPLOAD_RETRY_MS, log = console.log } = {}) {
+  const name = basename(file)
+  for (let i = 0; ; i++) {
+    try {
+      await ghFn(token, 'POST', `${uploadBase}?name=${encodeURIComponent(name)}`, await readBlob(file))
+      return
+    } catch (err) {
+      if (i >= retryMs.length) throw err
+      const wait = retryMs[i]
+      log(`  上传 ${name} 第 ${i + 1} 次失败（${String(err.message || err).slice(0, 160)}），${Math.round(wait / 1000)}s 后重试`)
+      await new Promise((r) => setTimeout(r, wait))
+      await deleteAssetByName(token, repo, relId, name, ghFn)
+    }
+  }
+}
+
 /** 建草稿 Release → 上传文件 →（beforePublish：Windows 安装包）→ 转为正式并设为最新；同版本的旧草稿（上次传到一半失败）先删掉，已正式发布的同版本不覆盖 */
 async function release(token, repo, { tag, sha, name, body, files, beforePublish = null }) {
   for (const r of await gh(token, 'GET', `/repos/${repo}/releases?per_page=30`)) {
@@ -283,13 +310,13 @@ async function release(token, repo, { tag, sha, name, body, files, beforePublish
   const uploadBase = rel.upload_url.replace(/\{.*\}$/, '')
   for (const file of files) {
     console.log(`上传 ${basename(file)} → ${repo}…`)
-    await gh(token, 'POST', `${uploadBase}?name=${encodeURIComponent(basename(file))}`, await openAsBlob(file))
+    await uploadAsset(token, repo, rel.id, uploadBase, file)
   }
   if (beforePublish) await beforePublish(rel)
   return gh(token, 'PATCH', `/repos/${repo}/releases/${rel.id}`, { draft: false, make_latest: 'true' })
 }
 
-module.exports = { compareVersions, parseArtifact, parseWinArtifact, parseWinZip, buildFeed, githubAssetUrl, waitForVersion, winRunTitle, githubRepo, sha512, gh, buildWindows }
+module.exports = { compareVersions, parseArtifact, parseWinArtifact, parseWinZip, buildFeed, githubAssetUrl, waitForVersion, winRunTitle, githubRepo, sha512, gh, buildWindows, uploadAsset, deleteAssetByName }
 
 if (require.main === module) {
   // 终端设了代理（HTTPS_PROXY）时 Node 的 fetch 默认不走代理，大文件直连 GitHub 会传到一半断开：带上 NODE_USE_ENV_PROXY 重新运行自己

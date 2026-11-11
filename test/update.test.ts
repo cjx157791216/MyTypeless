@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { compareVersions as cmp, DEFAULT_UPDATE_URL, friendlyUpdateError, isUnpackedWin, needsManualInstall, pendingIsInstalled, releasePageUrl, releasesLatestUrl, UPDATER_CACHE_DIR, updateUrl } from '../src/main/update-info.ts'
 
 const require = createRequire(import.meta.url)
-const { compareVersions, parseArtifact, parseWinArtifact, parseWinZip, buildFeed, githubAssetUrl, waitForVersion, winRunTitle } = require('../scripts/publish.cjs')
+const { compareVersions, parseArtifact, parseWinArtifact, parseWinZip, buildFeed, githubAssetUrl, waitForVersion, winRunTitle, uploadAsset } = require('../scripts/publish.cjs')
 const yaml = require('js-yaml')
 
 test('发布地址：GitHub 公开仓库最新 Release 的下载目录，MT_UPDATE_URL 只用于本机测试', () => {
@@ -119,4 +119,38 @@ test('waitForVersion：发布后 latest 地址有缓存，读到旧版本时重�
   let m = 0
   assert.equal(await waitForVersion(async () => (m++, '0.2.1'), '0.3.0', { tries: 3, delayMs: 1 }), '0.2.1')
   assert.equal(m, 3)
+})
+
+test('上传重试：失败后清理同名残骸资产再重传，不同名的资产不动；次数用完抛最后的错误', async () => {
+  const calls: string[] = []
+  let postCount = 0
+  // 模拟 408：zip 前两次上传被掐断（GitHub 会留下不完整资产），第三次成功；latest-mac.yml 一次成功
+  const fakeGh = async (_token: unknown, method: string, url: string) => {
+    calls.push(`${method} ${url.split('?')[0].replace(/^(https:\/\/(uploads\.)?github\.com)?\/repos\/o\/r\/releases\/9/, 'REL')}`)
+    if (method === 'GET' && url.includes('/assets')) return [{ id: 1, name: 'MyTypeless-0.3.10-20261111.2323-arm64.zip' }, { id: 2, name: 'latest-mac.yml' }]
+    if (method === 'POST') {
+      postCount++
+      if (url.includes('arm64.zip') && postCount <= 2) throw new Error('GitHub POST … 失败：HTTP 408 {"message":"Upload body timed out due to inactivity"}')
+      return null
+    }
+    return null
+  }
+  const opts = { ghFn: fakeGh, readBlob: async () => new Blob(), retryMs: [1, 1], log: () => {} }
+  await uploadAsset('t', 'o/r', 9, 'https://uploads.github.com/repos/o/r/releases/9', '/x/MyTypeless-0.3.10-20261111.2323-arm64.zip', opts)
+  assert.equal(postCount, 3)
+  assert.equal(calls.filter((c) => c.startsWith('DELETE')).length, 2) // 两次失败后各清一次同名残骸
+  assert.deepEqual(calls.filter((c) => c.startsWith('DELETE')), ['DELETE REL/assets/1', 'DELETE REL/assets/1']) // 只删 zip，latest-mac.yml 不动
+  await uploadAsset('t', 'o/r', 9, 'https://uploads.github.com/repos/o/r/releases/9', '/x/latest-mac.yml', opts)
+  assert.equal(calls.filter((c) => c.includes('assets/2')).length, 0)
+
+  let remaining = 99
+  const alwaysFail = async (_t: unknown, method: string, url: string) => {
+    if (method === 'GET' && url.includes('/assets')) return []
+    if (method === 'POST') { assert.ok(remaining-- > 0); throw new Error('HTTP 408') }
+    return null
+  }
+  await assert.rejects(
+    uploadAsset('t', 'o/r', 9, 'https://uploads.github.com/repos/o/r/releases/9', '/x/latest-mac.yml', { ghFn: alwaysFail, readBlob: async () => new Blob(), retryMs: [1, 1], log: () => {} }),
+    /HTTP 408/
+  )
 })
