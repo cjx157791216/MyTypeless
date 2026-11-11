@@ -272,17 +272,25 @@ function winRunTitle(tag) {
   return `Windows 安装包 ${tag}`
 }
 
-/** 上传失败后的重试间隔（毫秒）：弱网下大文件常被 GitHub 掐断（HTTP 408 Upload body timed out） */
-const UPLOAD_RETRY_MS = [10_000, 30_000, 60_000]
+/** 上传失败后的重试间隔（毫秒）：弱网下大文件常被 GitHub 掐断（HTTP 408 Upload body timed out）；末几轮也给被掐断的上传会话时间过期（残骸资产 started → 可删） */
+const UPLOAD_RETRY_MS = [10_000, 30_000, 60_000, 120_000, 300_000]
 
-/** 删掉草稿里的同名资产：上传被服务端掐断时 GitHub 会留下不完整的资产条目，重传同名会 422 already_exists */
+/** 删掉草稿里的同名资产：上传被服务端掐断时 GitHub 会留下不完整的资产条目，重传同名会 422 already_exists。返回是否删了东西；DELETE 404（会话已回收）不算错误 */
 async function deleteAssetByName(token, repo, relId, name, ghFn = gh) {
+  let deleted = false
   for (const a of await ghFn(token, 'GET', `/repos/${repo}/releases/${relId}/assets?per_page=100`)) {
-    if (a.name === name) await ghFn(token, 'DELETE', `/repos/${repo}/releases/${relId}/assets/${a.id}`)
+    if (a.name !== name) continue
+    try {
+      await ghFn(token, 'DELETE', `/repos/${repo}/releases/${relId}/assets/${a.id}`)
+      deleted = true
+    } catch (err) {
+      if (!/\b404\b/.test(String(err))) throw err
+    }
   }
+  return deleted
 }
 
-/** 上传一个文件到草稿 Release：失败时先清理同名残骸资产，再按 UPLOAD_RETRY_MS 退避重试（ghFn / readBlob / retryMs 可注入供测试） */
+/** 上传一个文件到草稿 Release：失败时先清理同名残骸资产（清理失败只记录，不阻塞重试），再按 UPLOAD_RETRY_MS 退避重试（ghFn / readBlob / retryMs 可注入供测试） */
 async function uploadAsset(token, repo, relId, uploadBase, file, { ghFn = gh, readBlob = (f) => openAsBlob(f), retryMs = UPLOAD_RETRY_MS, log = console.log } = {}) {
   const name = basename(file)
   for (let i = 0; ; i++) {
@@ -294,7 +302,11 @@ async function uploadAsset(token, repo, relId, uploadBase, file, { ghFn = gh, re
       const wait = retryMs[i]
       log(`  上传 ${name} 第 ${i + 1} 次失败（${String(err.message || err).slice(0, 160)}），${Math.round(wait / 1000)}s 后重试`)
       await new Promise((r) => setTimeout(r, wait))
-      await deleteAssetByName(token, repo, relId, name, ghFn)
+      try {
+        await deleteAssetByName(token, repo, relId, name, ghFn)
+      } catch (cleanup) {
+        log(`  清理同名残骸失败（继续重试）：${String(cleanup.message || cleanup).slice(0, 120)}`)
+      }
     }
   }
 }

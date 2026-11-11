@@ -154,3 +154,19 @@ test('上传重试：失败后清理同名残骸资产再重传，不同名的�
     /HTTP 408/
   )
 })
+
+test('上传重试：残骸资产 DELETE 404（上传会话已回收）不算错误，继续重传成功', async () => {
+  let postCount = 0
+  const fakeGh = async (_t: unknown, method: string, url: string) => {
+    if (method === 'GET' && url.includes('/assets')) return [{ id: 7, name: 'MyTypeless-0.3.10-20261111.2323-arm64.zip' }]
+    if (method === 'POST') {
+      postCount++
+      if (postCount === 1) throw new Error('GitHub POST … 失败：HTTP 408 Upload body timed out')
+      return null
+    }
+    if (method === 'DELETE') throw new Error('GitHub DELETE … 失败：HTTP 404 {"message":"Not Found"}')
+    return null
+  }
+  await uploadAsset('t', 'o/r', 9, 'https://uploads.github.com/repos/o/r/releases/9', '/x/MyTypeless-0.3.10-20261111.2323-arm64.zip', { ghFn: fakeGh, readBlob: async () => new Blob(), retryMs: [1], log: () => {} })
+  assert.equal(postCount, 2)
+})
