@@ -34,9 +34,9 @@ import { AppAudioCapture, appAudioSupported, appAudioUnsupportedHint, prepareApp
 import { denoiser, diarizer, speakerModel } from './diarizer'
 import { ECHO_AHEAD_FRAMES, ECHO_LEAD_FRAMES, removeEcho } from './echo'
 import { normalizeLoudness } from './enhance'
-import { convertWav, readWavInfo } from './import-audio'
+import { convertAudio, readAudioInfo } from './import-audio'
 import { parseRecordingFileName, recordingFileName, saveRecording, uniquePath } from './recording'
-import { LOCAL_CHUNK_CHARS, buildTranscript, cleanMinutesBody, generateMinutesBody, minutesHeader } from './minutes'
+import { LOCAL_CHUNK_CHARS, buildTranscript, cleanMinutesBody, generateDiagrams, generateMinutesBody, minutesHeader } from './minutes'
 import {
   MEETING_VAD,
   denoiseLagging,
@@ -170,11 +170,17 @@ export class MeetingManager {
         title: a.title,
         elapsedMs: this.elapsed(a),
         running: !a.paused,
+        showPill: loadSettings().showMeetingPill === true, // 会议中胶囊默认隐藏（D-049），设置开启时显示
         notice
       }
     }
     if (this.processing) return { ...base, state: 'processing', meetingId: this.processing.id, stage: this.processing.stage, notice }
     return { ...base, state: 'idle', notice }
+  }
+
+  /** 设置里的胶囊显示开关变化后立即重新广播（会议中途开 / 关即时生效，D-049） */
+  refreshLive(): void {
+    this.emit()
   }
 
   private starting = false
@@ -550,7 +556,7 @@ export class MeetingManager {
   }
 
   /**
-   * 导入录音（D-046）：把一个 WAV 转成临时录音，按开会时同样的流程（降噪分句、句内换人、声纹、识别、定期重新区分说话人）处理，
+   * 导入录音（D-046）：把一个 WAV / MP3 转成临时录音，按开会时同样的流程（降噪分句、句内换人、声纹、识别、定期重新区分说话人）处理，
    * 再照常整理。整段录音按一路处理（麦克风 + 会议软件时保存的录音已混成一路）；原文件不动、不复制，记作这场会议保存的录音。
    * 读完文件头、建好会议就返回，转写在后台进行（主窗口按整理中显示进度）
    */
@@ -562,7 +568,7 @@ export class MeetingManager {
     if (typeof asr === 'string') return { ok: false, error: asr }
     let durationMs: number
     try {
-      durationMs = (await readWavInfo(file)).durationMs
+      durationMs = (await readAudioInfo(file)).durationMs
     } catch (err) {
       return { ok: false, error: (err as Error).message || '无法读取这个文件' }
     }
@@ -593,7 +599,7 @@ export class MeetingManager {
     }
     let total: number
     try {
-      total = await convertWav(file, path, (done, all) => stage(`正在读取录音（${Math.floor((done / all) * 100)}%）…`))
+      total = await convertAudio(file, path, (done, all) => stage(`正在读取录音（${Math.floor((done / all) * 100)}%）…`))
     } catch (err) {
       console.warn('[meeting] import convert failed:', err)
       removeFile(path)
@@ -1259,6 +1265,15 @@ export class MeetingManager {
       const minutes = `${minutesHeader({ title: detail.title, startedAt: detail.startedAt, durationMs: detail.durationMs, speakers })}\n${markSpeakerNames(cleanMinutesBody(body), speakers)}\n`
       store.updateMeeting(meetingId, { minutes, minutesError: null })
       this.minutesCache.delete(meetingId)
+      // 内容分析生成图表（D-048）：从纪要提炼 Mermaid 图，有适合画的内容才有；失败只影响图表，不影响已保存的纪要
+      try {
+        this.processing = { id: meetingId, stage: '正在分析内容、生成图表…' }
+        this.emit()
+        const diagrams = await generateDiagrams(minutes, { complete: (system, user) => llm.complete(system, user) })
+        store.updateMeeting(meetingId, { diagrams: diagrams.length ? JSON.stringify(diagrams) : null })
+      } catch (err) {
+        console.warn('[meeting] diagrams failed:', err)
+      }
       return { ok: true }
     } catch (err) {
       // 转写稿已完整保存（D-008 的会议版），只记录纪要失败的原因

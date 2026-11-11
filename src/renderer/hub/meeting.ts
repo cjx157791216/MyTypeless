@@ -5,7 +5,7 @@ import { $, api, escapeHtml, fmtClock, fmtDate, fmtDuration, fmtTime, hidePopove
 // 会议页（D-015）：会议列表 / 开始会议 / 会议详情（实时转写、说话人纠正、纪要）
 // 线上会议（D-033）：声音来源三选一；麦克风 + 会议软件时分「现场」「线上」两路，各自的人数与说话人
 
-type Tab = 'minutes' | 'transcript' | 'speakers'
+type Tab = 'charts' | 'minutes' | 'transcript' | 'speakers'
 
 let live: MeetingLive = { state: 'idle' }
 let liveAt = 0
@@ -270,7 +270,6 @@ $('btn-meeting-start').addEventListener('click', async () => {
     return
   }
   ;($('meeting-title') as HTMLInputElement).value = ''
-  toast('会议已开始：请告知参会者正在录音转写')
   navigate(`#meeting/${r.meetingId}`)
 })
 
@@ -319,6 +318,8 @@ async function loadDetail(): Promise<void> {
     return
   }
   detail = d
+  // 上一个会议停留的「图表」标签：这场没有图表时退回「转写」
+  if (tab === 'charts' && !d.diagrams.length) tab = 'transcript'
   if (!tabChosen) tab = d.status === 'done' && (d.minutes || d.minutesError) ? 'minutes' : 'transcript'
   renderDetail()
 }
@@ -342,6 +343,8 @@ function renderDetail(): void {
     .filter(Boolean)
     .join(' · ')
   renderBars()
+  // 图表（D-048）：没有图表时不出「图表」标签
+  document.querySelector<HTMLButtonElement>('#meeting-tabs button[data-tab="charts"]')!.classList.toggle('hidden', !d.diagrams.length)
   for (const b of document.querySelectorAll<HTMLButtonElement>('#meeting-tabs button')) b.classList.toggle('active', b.dataset.tab === tab)
   for (const p of document.querySelectorAll<HTMLElement>('#meeting-detail-view .tab-panel')) p.classList.toggle('active', p.dataset.tab === tab)
   const audio = $('btn-meeting-reveal-audio')
@@ -352,6 +355,7 @@ function renderDetail(): void {
   renderTranscript()
   renderSpeakers()
   renderMinutes()
+  renderCharts()
 }
 
 /** 说话人栏：按声音自动区分出的每个人，点击改名 */
@@ -720,6 +724,62 @@ function selectTab(t: Tab): void {
   tab = t
   tabChosen = true
   renderDetail()
+}
+
+// —— 图表（D-048）——
+
+let mermaidModule: Promise<typeof import('mermaid')['default']> | null = null
+
+function loadMermaid(): Promise<typeof import('mermaid')['default']> {
+  if (!mermaidModule) {
+    // 按需加载：第一次查看图表时才拉起 mermaid；主题跟随系统深浅色
+    mermaidModule = import('mermaid').then((m) => {
+      m.default.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'
+      })
+      return m.default
+    })
+  }
+  return mermaidModule
+}
+
+let chartsShownFor: MeetingDetail | null = null
+
+/** 图表（D-048）：逐张渲染 Mermaid；渲染失败的按原文显示代码。按 detail 对象去重，整理中的反复刷新不重复渲染 */
+function renderCharts(): void {
+  const d = detail!
+  if (chartsShownFor === d) return
+  chartsShownFor = d
+  const list = $('charts-list')
+  list.innerHTML = ''
+  if (!d.diagrams.length) return
+  void loadMermaid().then(async (mermaid) => {
+    for (let i = 0; i < d.diagrams.length; i++) {
+      const dg = d.diagrams[i]
+      const card = document.createElement('div')
+      card.className = 'chart-card'
+      const head = document.createElement('div')
+      head.className = 'chart-title'
+      head.textContent = dg.title
+      const body = document.createElement('div')
+      body.className = 'chart-body'
+      card.append(head, body)
+      list.appendChild(card)
+      try {
+        const { svg } = await mermaid.render(`mt-diagram-${d.id}-${i}`, dg.code)
+        if (detail !== d) return // 详情已切走
+        body.innerHTML = svg
+      } catch {
+        if (detail !== d) return
+        const pre = document.createElement('pre')
+        pre.className = 'chart-code'
+        pre.textContent = dg.code
+        body.appendChild(pre)
+      }
+    }
+  })
 }
 
 for (const b of document.querySelectorAll<HTMLButtonElement>('#meeting-tabs button')) b.addEventListener('click', () => selectTab(b.dataset.tab as Tab))

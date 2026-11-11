@@ -56,6 +56,7 @@ export async function loadSettingsIntoUi(): Promise<void> {
   ;($('style-note') as HTMLTextAreaElement).value = s.styleNote ?? ''
   ;($('auto-update') as HTMLInputElement).checked = s.autoCheckUpdates !== false
   renderMeetingAudio(s)
+  renderMeetingPill(s)
   await loadMicDevices(s.micDeviceId ?? '')
   ;($('asr-key-state') as HTMLElement).textContent = s.asr.hasApiKey ? `已配置（${s.asr.apiKeyMasked}）` : '未配置'
   ;($('llm-key-state') as HTMLElement).textContent = s.llm.hasApiKey ? `已配置（${s.llm.apiKeyMasked}）` : '未配置'
@@ -453,6 +454,15 @@ function renderMeetingAudio(s: Settings): void {
   $('meeting-audio-dir').textContent = s.meetingAudioDir ? `保存到：${s.meetingAudioDir}` : '保存到：应用数据目录（请点「更改…」选一个文件夹）'
   $('meeting-audio-dir').title = s.meetingAudioDir
 }
+
+// —— 会议胶囊（D-049）：会议进行中浮动条默认隐藏，这里打开后显示「会议中」与暂停 / 结束 ——
+function renderMeetingPill(s: Settings): void {
+  ;($('meeting-show-pill') as HTMLInputElement).checked = s.showMeetingPill === true
+}
+
+$('meeting-show-pill').addEventListener('change', async () => {
+  savedSettings = await api.settings.set({ showMeetingPill: ($('meeting-show-pill') as HTMLInputElement).checked })
+})
 
 async function pickMeetingAudioDir(): Promise<string | null> {
   const dir = await api.meeting.audioDir('pick')

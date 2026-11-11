@@ -3,7 +3,8 @@ import { resolve } from 'path'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // mpg123-decoder 打进主进程产物：包是纯 ESM，Electron 33 的 asar 不支持 ESM，外部依赖会在打包版里解不出来
+    plugins: [externalizeDepsPlugin({ exclude: ['mpg123-decoder', '@wasm-audio-decoders/common'] })],
     // 构建号与提交（scripts/dist.cjs 设置；开发运行时为 dev）
     define: {
       __MT_BUILD__: JSON.stringify(process.env.MT_BUILD ?? 'dev'),

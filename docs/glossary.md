@@ -73,7 +73,8 @@
 | 声音来源 | `MeetingSource`（`mic` / `mixed` / `app`）、`meetingSource` | 会议录哪里的声音：只用麦克风 / 麦克风 + 会议软件 / 只用会议软件的声音 | D-033 |
 | 现场 / 线上（一路） | `MeetingTrack`（0 / 1）、`track` 列 | 会议录音的一路：麦克风为现场，应用声音为线上；每一路各自区分说话人、各有人数（线上人数 `expected_remote`） | D-033 |
 | 通话中自动录入麦克风 | `autoMic`、`micInUse`、`onCallMic`、`mt-audiotap` 的 `{"input":bool}` | 只用会议软件的声音时，所选会议软件正在用麦克风（用户在通话中）就同时录下用户的麦克风，作为「现场」一路加入 | D-045 |
-| 导入录音 | `importRecording`、`meetingImport`、`import-audio.ts` | 选一个 WAV 录音，按开会同样的流程转写、区分说话人、整理成一场会议 | D-046 |
+| 导入录音 | `importRecording`、`meetingImport`、`import-audio.ts`、`readAudioInfo`、`convertAudio` | 选一个 WAV / MP3 录音，按开会同样的流程转写、区分说话人、整理成一场会议 | D-046 |
+| 会议图表 | `MeetingDiagram`、`diagrams` 列、`generateDiagrams`、`parseDiagrams`、mermaid | 纪要生成后内容分析提炼的 Mermaid 图（最多 3 张），详情页「图表」标签展示，没有则不出标签 | D-048 |
 | 外放回声 | `removeEcho`、`ECHO_CORR` | 外放时麦克风再录到的对方声音；按时间-频谱包络与同一时刻的应用声音比较后去掉 | D-033 |
 | 在线更新 | `updater.ts`、`UpdateState`、`autoCheckUpdates` | 检查发布地址的新版本 → 提示 → 用户确认后应用内下载 → 重启更新 | D-028 |
 | 发布地址 | `DEFAULT_UPDATE_URL`、`MT_UPDATE_URL` | 存放版本说明与安装包的公开地址（代码仓库 cjx157791216/MyTypeless 的最新 Release；旧版本读取 mytypeless-releases） | D-032 |

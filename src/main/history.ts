@@ -82,7 +82,8 @@ function open(): Database.Database {
       expected_speakers INTEGER,
       minutes TEXT,
       minutes_error TEXT,
-      audio_path TEXT
+      audio_path TEXT,
+      diagrams TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_meetings_started ON meetings(started_at DESC);
 
@@ -149,6 +150,8 @@ function migrateColumns(): void {
   if (!meetingCols.has('expected_remote')) d.exec(`ALTER TABLE meetings ADD COLUMN expected_remote INTEGER`)
   // 保存下来的会议录音（D-044）：用户选的文件夹里的 WAV，删除会议时不删
   if (!meetingCols.has('saved_audio_path')) d.exec(`ALTER TABLE meetings ADD COLUMN saved_audio_path TEXT`)
+  // 内容分析生成的图表（D-048）：JSON 数组 [{ title, code }]，code 为 Mermaid；没有为 NULL
+  if (!meetingCols.has('diagrams')) d.exec(`ALTER TABLE meetings ADD COLUMN diagrams TEXT`)
   if (!segCols.has('track')) d.exec(`ALTER TABLE meeting_segments ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)
   const speakerCols = new Set((d.prepare(`PRAGMA table_info(meeting_speakers)`).all() as Array<{ name: string }>).map((c) => c.name))
   if (!speakerCols.has('track')) d.exec(`ALTER TABLE meeting_speakers ADD COLUMN track INTEGER NOT NULL DEFAULT 0`)

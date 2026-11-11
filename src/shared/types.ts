@@ -102,6 +102,7 @@ export interface Settings {
   meetingRemoteSpeakers: number // 上次选的线上人数（应用声音里有几个人；AUTO_SPEAKERS = 自动）
   meetingSaveAudio: boolean // 保存会议录音（D-044）：整理时把录音存成 WAV 放到 meetingAudioDir；默认关（只临时保存、整理完删除，D-016）
   meetingAudioDir: string // 会议录音保存到哪个文件夹（用户勾选时选定）；空或不可写时存到应用数据目录的 saved-recordings
+  showMeetingPill: boolean // 会议进行中在浮动条显示「会议中」胶囊（D-049）；默认关（隐藏，结束 / 暂停在会议页或托盘进行）
   autoCheckUpdates: boolean // 启动后与每 6 小时检查一次新版本（只读发布地址的版本说明，D-028）
 }
 
@@ -181,6 +182,13 @@ export interface MeetingSummary {
   hasMinutes: boolean
 }
 
+/** 会议图表（D-048）：内容分析从纪要里提炼的 Mermaid 图（流程 / 架构 / 时序等），没有则不出「图表」标签 */
+export interface MeetingDiagram {
+  title: string
+  /** Mermaid 代码；渲染失败时按原文显示 */
+  code: string
+}
+
 export interface MeetingDetail extends MeetingSummary {
   source: MeetingSource
   appName: string | null // 截取声音的应用（全部系统声音时为“系统声音”）
@@ -191,6 +199,7 @@ export interface MeetingDetail extends MeetingSummary {
   minutes: string | null // Markdown
   minutesError: string | null
   savedAudioPath: string | null // 保存下来的会议录音（D-044）；没保存为 null。文件由用户管理，删除会议时不删
+  diagrams: MeetingDiagram[] // 内容分析生成的图表（D-048）；没有为空数组
 }
 
 /** 当前会议的实时状态（main → 浮动条/主窗口） */
@@ -201,6 +210,7 @@ export interface MeetingLive {
   elapsedMs?: number // 发出时已录时长（暂停不计）
   running?: boolean // 正在计时（recording）
   stage?: string // processing 时的步骤说明
+  showPill?: boolean // 会议进行中是否显示浮动条的「会议中」胶囊（按设置 showMeetingPill 算好，D-049）
   notice?: string // 一次性提示（如即将到达时长上限、声纹模型下载中）
   speakerModel?: 'ready' | 'missing' | 'downloading' | 'error'
   speakerModelProgress?: number // 0..1

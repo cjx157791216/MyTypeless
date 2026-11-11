@@ -552,6 +552,8 @@ function registerIpc(): void {
     applyLoginItem(next)
     updater.schedule()
     rebuildTrayMenu()
+    // 会议胶囊显示开关：会议进行中改了立即生效（D-049）
+    if (prev.showMeetingPill !== next.showMeetingPill) meeting.refreshLive()
     return next
   })
   ipcMain.handle(IPC.settingsSetKey, (_e, which: 'asr' | 'llm', key: string) => {
@@ -705,7 +707,7 @@ function registerIpc(): void {
       title: '选择要导入的会议录音',
       buttonLabel: '导入',
       defaultPath: dir && existsSync(dir) ? dir : app.getPath('documents'),
-      filters: [{ name: 'WAV 录音', extensions: ['wav'] }],
+      filters: [{ name: '录音文件（WAV / MP3）', extensions: ['wav', 'mp3'] }],
       properties: ['openFile']
     }
     const res = parent ? await dialog.showOpenDialog(parent, dialogOpts) : await dialog.showOpenDialog(dialogOpts)
