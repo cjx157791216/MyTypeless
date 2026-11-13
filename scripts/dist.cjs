@@ -15,7 +15,11 @@ const pad = (n) => String(n).padStart(2, '0')
 // 构建号一律按北京时间（UTC+8，与发布者 Mac 的时间一致）：Windows 包在 GitHub 的机器（UTC）上打，各地贡献者的时区也不同
 const BUILD_UTC_OFFSET_HOURS = 8
 const now = new Date(Date.now() + BUILD_UTC_OFFSET_HOURS * 3600_000)
-const build = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}.${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}`
+// 分钟尾 0 必须避开：electron-builder 写 Info.plist 时把 buildVersion 当数字，"…2250" 会变成 "…225"，
+// 发布脚本的 plist 校验即失败（0.3.11 首次发布实测）；分钟 +1 退出这个坑
+let minute = now.getUTCMinutes()
+if (minute % 10 === 0) minute += 1
+const build = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}.${pad(now.getUTCHours())}${pad(minute)}`
 let commit = 'unknown'
 let sha = ''
 let dirty = false
