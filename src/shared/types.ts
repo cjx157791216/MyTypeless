@@ -180,6 +180,23 @@ export interface MeetingSummary {
   status: MeetingStatus
   speakers: string[]
   hasMinutes: boolean
+  /** 所属文件夹（D-050）；null = 未分类 */
+  folderId: string | null
+  /** 移入回收站的时间戳（D-050）；null = 正常。列表返回全部（含回收站），侧栏计数与过滤用 */
+  deletedAt: number | null
+}
+
+/** 会议文件夹（D-050）：用户自建的归类，一个会议只在一个文件夹里 */
+export interface MeetingFolder {
+  id: string
+  name: string
+  createdAt: number
+}
+
+/** 新建文件夹的返回：新建的项（便于选中）+ 最新列表 */
+export interface MeetingFolderCreated {
+  folder: MeetingFolder | null
+  folders: MeetingFolder[]
 }
 
 /** 会议图表（D-048）：内容分析从纪要里提炼的 Mermaid 图（流程 / 架构 / 时序等），没有则不出「图表」标签 */

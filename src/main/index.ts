@@ -11,6 +11,8 @@ import { DictationSessionManager } from './session'
 import { HotkeyController } from './hotkeys'
 import { hotkeysChanged } from './bindings'
 import { listHistory, getHistory, deleteHistory, clearHistory, listWords, addWord, removeWord, historyStats, listStyleSamples, deleteStyleSample, clearStyleSamples } from './history'
+import { database } from './history'
+import { initMeetingStore } from './meeting/store'
 import { checkAccessibility, injectText, openAccessibilitySettings } from './inject'
 import { activateApp, getFrontApp, setNoActivate } from './native'
 import { checkLocalAsrHealth } from './providers/asr'
@@ -791,6 +793,7 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     devlog('app ready, starting services')
+    initMeetingStore(database()) // 会议存储的连接注入（D-050）：必须在 MeetingManager 之前（markInterrupted 会查库）
     session = new DictationSessionManager()
     session.onProgress(onSessionProgress)
     meeting = new MeetingManager({

@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 import Database from 'better-sqlite3'
 import type { HistoryRecord, HistoryStats, StyleSample } from '../shared/types'
+import { ensureFolderSchema } from './meeting/store'
 
 /**
  * M2 历史与词典存储：better-sqlite3（原创 schema）
@@ -127,6 +128,7 @@ function open(): Database.Database {
     );
   `)
   migrateColumns()
+  ensureFolderSchema(db!) // 会议文件夹与回收站（D-050）：新表与 meetings 补列，幂等
   migrateLegacyJsonl()
   return db
 }
