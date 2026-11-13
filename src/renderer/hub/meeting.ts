@@ -1,4 +1,4 @@
-import { AUTO_SPEAKERS, type AudioApp, type MeetingDetail, type MeetingLive, type MeetingSegment, type MeetingSource, type MeetingSpeaker, type MeetingSummary, type MeetingTrack } from '../../shared/types'
+import { AUTO_SPEAKERS, type AudioApp, type MeetingDetail, type MeetingFolder, type MeetingLive, type MeetingSegment, type MeetingSource, type MeetingSpeaker, type MeetingSummary, type MeetingTrack } from '../../shared/types'
 import { renderMarkdown } from '../../shared/markdown'
 import { $, api, escapeHtml, fmtClock, fmtDate, fmtDuration, fmtTime, hidePopover, showPopover, showPopoverContent, speakerColor, toast, type PopoverItem } from './util'
 
@@ -17,9 +17,38 @@ let editing = false
 let navigate: (hash: string) => void = () => {}
 let reloadTimer: number | null = null
 
+// —— 文件夹与回收站（D-050）：列表视图的状态 ——
+type Scope = 'all' | 'unassigned' | 'trash' | string
+let scope: Scope = 'all'
+let sortDesc = true
+let meetings: MeetingSummary[] = []
+let folders: MeetingFolder[] = []
+
 
 export function initMeeting(nav: (hash: string) => void): void {
   navigate = nav
+  // 文件夹面板的静态入口与列表工具（D-050）：元素常驻 DOM，绑一次
+  for (const el of $('meeting-folders').querySelectorAll<HTMLElement>('.folder-item[data-scope]')) {
+    el.addEventListener('click', () => {
+      scope = el.dataset.scope as Scope
+      renderFolderPanel()
+      renderMeetingList()
+    })
+  }
+  $('btn-folder-new').addEventListener('click', (e) => {
+    folderNamePopover(e.currentTarget as HTMLElement, '', (name) => {
+      void api.folders.create(name).then((r) => {
+        if (r.folder) scope = r.folder.id // 建好直接进入该文件夹
+        void loadList()
+      })
+    })
+  })
+  $('meeting-search').addEventListener('input', () => renderMeetingList())
+  $('btn-meeting-sort').addEventListener('click', () => {
+    sortDesc = !sortDesc
+    $('btn-meeting-sort').textContent = sortDesc ? '最新优先' : '最早优先'
+    renderMeetingList()
+  })
 }
 
 export function currentLive(): MeetingLive {
@@ -76,7 +105,9 @@ let startInited = false
 let appsSupported = true
 
 async function loadList(): Promise<void> {
-  const meetings = await api.meeting.list()
+  const [list, fs] = await Promise.all([api.meeting.list(), api.folders.list()])
+  meetings = list
+  folders = fs
   if (!startInited) {
     startInited = true
     const s = await api.settings.get()
@@ -93,9 +124,15 @@ async function loadList(): Promise<void> {
   void prepareAppAudio()
   renderStartCard()
   void renderAudioNote()
+  renderInterrupted()
+  renderFolderPanel()
+  renderMeetingList()
+}
+
+function renderInterrupted(): void {
   const box = $('meeting-interrupted')
   box.innerHTML = ''
-  for (const m of meetings.filter((x) => x.status === 'interrupted')) {
+  for (const m of meetings.filter((x) => x.status === 'interrupted' && !x.deletedAt)) {
     const card = document.createElement('div')
     card.className = 'card interrupted'
     const text = document.createElement('span')
@@ -107,16 +144,121 @@ async function loadList(): Promise<void> {
     card.append(text, btn)
     box.appendChild(card)
   }
+}
 
+/** 侧栏计数与列表同源：从 meetings 派生（D-050） */
+function renderFolderPanel(): void {
+  const counts: Record<string, number> = { all: 0, unassigned: 0, trash: 0 }
+  for (const f of folders) counts[f.id] = 0
+  for (const m of meetings) {
+    if (m.deletedAt) counts.trash++
+    else {
+      counts.all++
+      if (m.folderId) counts[m.folderId] = (counts[m.folderId] ?? 0) + 1
+      else counts.unassigned++
+    }
+  }
+  for (const el of $('meeting-folders').querySelectorAll<HTMLElement>('.folder-item')) {
+    const s = el.dataset.scope
+    el.classList.toggle('active', s === scope)
+    const n = s ? counts[s] : undefined
+    ;(el.querySelector('.count') as HTMLElement | null)?.replaceChildren(String(n ?? ''))
+  }
+  const box = $('folder-items')
+  box.innerHTML = ''
+  for (const f of folders) {
+    const el = document.createElement('button')
+    el.className = 'folder-item' + (scope === f.id ? ' active' : '')
+    el.dataset.scope = f.id
+    const name = document.createElement('span')
+    name.className = 'name'
+    name.textContent = f.name
+    const count = document.createElement('span')
+    count.className = 'count'
+    count.textContent = String(counts[f.id] ?? 0)
+    const menu = document.createElement('button')
+    menu.className = 'item-menu'
+    menu.textContent = '⋯'
+    menu.title = '文件夹操作'
+    menu.addEventListener('click', (e) => {
+      e.stopPropagation()
+      showPopover(menu, [
+        { header: f.name },
+        { label: '重命名', onClick: () => folderNamePopover(menu, f.name, (name) => void api.folders.rename(f.id, name).then(() => loadList())) },
+        { label: '删除文件夹', onClick: () => {
+          if (!confirm(`删除文件夹「${f.name}」？里面的会议会移到「未分类」，不会删除会议。`)) return
+          void api.folders.remove(f.id).then(() => {
+            if (scope === f.id) scope = 'all'
+            void loadList()
+          })
+        } }
+      ])
+    })
+    el.addEventListener('click', () => {
+      scope = f.id
+      renderFolderPanel()
+      renderMeetingList()
+    })
+    el.append(name, count, menu)
+    box.appendChild(el)
+  }
+}
+
+/** 新建 / 重命名文件夹的输入表单（popover 里） */
+function folderNamePopover(anchor: HTMLElement, initial: string, save: (name: string) => void): void {
+  const wrap = document.createElement('div')
+  wrap.className = 'folder-name-form'
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.value = initial
+  input.placeholder = '文件夹名称'
+  input.maxLength = 30
+  const btn = document.createElement('button')
+  btn.className = 'btn mini primary'
+  btn.textContent = '保存'
+  const submit = () => {
+    const name = input.value.trim()
+    if (!name) return
+    hidePopover()
+    save(name)
+  }
+  btn.addEventListener('click', submit)
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit()
+  })
+  wrap.append(input, btn)
+  showPopoverContent(anchor, wrap)
+  input.focus()
+  input.select()
+}
+
+function renderMeetingList(): void {
+  const q = ($('meeting-search') as HTMLInputElement).value.trim().toLowerCase()
+  const rows = meetings
+    .filter((m) => (scope === 'trash' ? !!m.deletedAt : !m.deletedAt && (scope === 'all' || (scope === 'unassigned' ? !m.folderId : m.folderId === scope))))
+    .filter((m) => !q || m.title.toLowerCase().includes(q))
+    .sort((a, b) => (sortDesc ? b.startedAt - a.startedAt : a.startedAt - b.startedAt))
   const list = $('meeting-list')
   list.innerHTML = ''
-  if (!meetings.length) {
-    list.innerHTML = '<div class="empty">还没有会议记录</div>'
+  if (!rows.length) {
+    const empty = document.createElement('div')
+    empty.className = 'empty'
+    empty.textContent = q
+      ? '没有找到相关会议'
+      : scope === 'trash'
+        ? '回收站是空的'
+        : scope === 'unassigned'
+          ? '没有未分类的会议'
+          : scope === 'all'
+            ? '还没有会议记录'
+            : '此文件夹还没有会议'
+    list.appendChild(empty)
     return
   }
-  for (const m of meetings) {
+  const inTrash = scope === 'trash'
+  for (const m of rows) {
     const el = document.createElement('div')
-    el.className = 'meeting-item'
+    el.className = 'meeting-item' + (inTrash ? ' trash-row' : '')
     const status = m.status === 'done' && !m.hasMinutes ? '无纪要' : STATUS_TEXT[m.status]
     const badgeCls = m.status === 'recording' || m.status === 'paused' ? 'live' : m.status === 'interrupted' || status === '无纪要' ? 'warn' : ''
     el.innerHTML = `
@@ -124,7 +266,8 @@ async function loadList(): Promise<void> {
         <span class="title"></span>
         <span class="meta"></span>
       </div>
-      ${status ? `<span class="status-badge ${badgeCls}">${status}</span>` : ''}`
+      ${status && !inTrash ? `<span class="status-badge ${badgeCls}">${status}</span>` : ''}
+      ${inTrash ? '<span class="trash-actions"><button class="btn mini act-restore">恢复</button><button class="btn mini act-purge">彻底删除</button></span>' : '<button class="item-menu" title="更多操作">⋯</button>'}`
     ;(el.querySelector('.title') as HTMLElement).textContent = m.title
     ;(el.querySelector('.meta') as HTMLElement).textContent = [
       `${fmtDate(m.startedAt)} ${fmtTime(m.startedAt)}`,
@@ -133,9 +276,38 @@ async function loadList(): Promise<void> {
     ]
       .filter(Boolean)
       .join(' · ')
-    el.addEventListener('click', () => navigate(`#meeting/${m.id}`))
+    if (inTrash) {
+      el.querySelector('.act-restore')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        void api.meeting.restore(m.id).then(() => loadList())
+      })
+      el.querySelector('.act-purge')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        if (!confirm(`彻底删除「${m.title}」？文字、说话人和临时录音都会删除，不可恢复。已保存到文件夹的录音不受影响。`)) return
+        void api.meeting.remove(m.id).then(() => loadList())
+      })
+    } else {
+      el.addEventListener('click', () => navigate(`#meeting/${m.id}`))
+      const menu = el.querySelector('.item-menu') as HTMLElement
+      menu.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const items: PopoverItem[] = [{ header: '移动到文件夹' }]
+        for (const f of folders.filter((x) => x.id !== m.folderId)) items.push({ label: f.name, onClick: () => void moveTo(m.id, f.id) })
+        if (m.folderId) items.push({ label: '未分类', onClick: () => void moveTo(m.id, null) })
+        items.push('sep', { label: '移到回收站', onClick: () => void trash(m.id) })
+        showPopover(menu, items)
+      })
+    }
     list.appendChild(el)
   }
+}
+
+async function moveTo(id: string, folderId: string | null): Promise<void> {
+  if (!(await api.meeting.moveToFolder(id, folderId))) toast('移动失败，请重试')
+}
+
+async function trash(id: string): Promise<void> {
+  if (!(await api.meeting.trash(id))) toast('会议进行中或整理中，不能移入回收站')
 }
 
 /** 「其他应用…」选项的值（选它时展开其余正在运行的应用） */
@@ -315,6 +487,10 @@ async function loadDetail(): Promise<void> {
   const d = await api.meeting.get(currentId)
   if (!d) {
     navigate('#meeting')
+    return
+  }
+  if (d.deletedAt) {
+    navigate('#meeting') // 会议在回收站里（软删后的 stale hash）：回列表
     return
   }
   detail = d
@@ -798,10 +974,11 @@ const exportMeeting = (part: 'minutes' | 'transcript') => detail && api.meeting.
 $('btn-minutes-export').addEventListener('click', () => void exportMeeting('minutes'))
 $('btn-transcript-export').addEventListener('click', () => void exportMeeting('transcript'))
 $('btn-meeting-delete').addEventListener('click', async () => {
-  const kept = detail?.savedAudioPath ? `\n\n保存到文件夹里的录音（${detail.savedAudioPath}）不会删除。` : ''
-  if (!detail || !confirm(`删除会议「${detail.title}」？文字、说话人和临时录音都会删除，不可恢复。${kept}`)) return
-  if (await api.meeting.remove(detail.id)) navigate('#meeting')
-  else toast('会议进行中或整理中，不能删除')
+  if (!detail) return
+  const kept = detail.savedAudioPath ? `\n\n保存到文件夹里的录音（${detail.savedAudioPath}）不会删除。` : ''
+  if (!confirm(`把会议「${detail.title}」移入回收站？之后可以在回收站恢复或彻底删除。${kept}`)) return
+  if (await api.meeting.trash(detail.id)) navigate('#meeting')
+  else toast('会议进行中或整理中，不能移入回收站')
 })
 $('btn-minutes-edit').addEventListener('click', () => {
   if (!detail?.minutes) return

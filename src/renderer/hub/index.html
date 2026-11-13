@@ -151,7 +151,7 @@
           </div>
         </section>
 
-        <!-- 会议（D-015） -->
+        <!-- 会议（D-015）：左侧文件夹面板 + 右侧列表（D-050） -->
         <section class="page" id="page-meeting">
           <div id="meeting-list-view">
             <header class="page-head">
@@ -159,9 +159,22 @@
                 <h1>会议</h1>
                 <p class="sub">录下线下或线上会议，自动区分说话人，会后生成会议纪要</p>
               </div>
+              <div class="meeting-tools">
+                <input id="meeting-search" type="search" placeholder="搜索会议主题" />
+                <button id="btn-meeting-sort" class="btn mini" title="按创建时间排序">最新优先</button>
+              </div>
             </header>
-            <div id="meeting-interrupted"></div>
-            <div class="card start-card" id="meeting-start-card">
+            <div class="meeting-shell">
+              <aside class="folder-panel" id="meeting-folders">
+                <button class="folder-item active" data-scope="all">全部会议<span class="count"></span></button>
+                <button class="folder-item" data-scope="unassigned">未分类<span class="count"></span></button>
+                <div id="folder-items"></div>
+                <button id="btn-folder-new" class="folder-item folder-new">＋ 新建文件夹</button>
+                <button class="folder-item trash" data-scope="trash">回收站<span class="count"></span></button>
+              </aside>
+              <div class="meeting-main">
+                <div id="meeting-interrupted"></div>
+                <div class="card start-card" id="meeting-start-card">
               <div class="start-row">
                 <input id="meeting-title" type="text" placeholder="会议主题（可选）" />
                 <button id="btn-meeting-start" class="btn primary">
@@ -185,7 +198,9 @@
               <div class="hint">选好人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；<span id="meeting-audio-note">录音只在本机临时保存，整理完自动删除。</span>会议进行中 <span class="main-key">Fn</span> 听写暂停。</div>
               <div class="hint" id="meeting-start-state"></div>
             </div>
-            <div id="meeting-list" class="meeting-list"></div>
+                <div id="meeting-list" class="meeting-list"></div>
+              </div>
+            </div>
           </div>
 
           <div id="meeting-detail-view" class="hidden">
