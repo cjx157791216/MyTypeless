@@ -27,19 +27,15 @@ let folders: MeetingFolder[] = []
 
 export function initMeeting(nav: (hash: string) => void): void {
   navigate = nav
-  // 文件夹面板的静态入口与列表工具（D-050）：元素常驻 DOM，绑一次
-  for (const el of $('meeting-folders').querySelectorAll<HTMLElement>('.folder-item[data-scope]')) {
-    el.addEventListener('click', () => {
-      scope = el.dataset.scope as Scope
-      renderFolderPanel()
-      renderMeetingList()
-    })
+  // 侧栏分类导航（D-050）：静态项绑定一次；点击分类回列表视图
+  for (const el of document.querySelectorAll<HTMLElement>('.nav[data-for="meeting"] [data-scope]')) {
+    el.addEventListener('click', () => goToList(el.dataset.scope as Scope))
   }
   $('btn-folder-new').addEventListener('click', (e) => {
     folderNamePopover(e.currentTarget as HTMLElement, '', (name) => {
       void api.folders.create(name).then((r) => {
-        if (r.folder) scope = r.folder.id // 建好直接进入该文件夹
-        void loadList()
+        if (r.folder) goToList(r.folder.id) // 建好直接进入该文件夹
+        else void loadList()
       })
     })
   })
@@ -125,7 +121,7 @@ async function loadList(): Promise<void> {
   renderStartCard()
   void renderAudioNote()
   renderInterrupted()
-  renderFolderPanel()
+  renderMeetingNav()
   renderMeetingList()
 }
 
@@ -146,8 +142,10 @@ function renderInterrupted(): void {
   }
 }
 
-/** 侧栏计数与列表同源：从 meetings 派生（D-050） */
-function renderFolderPanel(): void {
+/** 会议模式的侧栏分类导航（D-050）：「全部 / 未分类 / 各文件夹 / 回收站」，计数与列表同源派生 */
+function renderMeetingNav(): void {
+  const nav = document.querySelector('.nav[data-for="meeting"]')
+  if (!nav) return
   const counts: Record<string, number> = { all: 0, unassigned: 0, trash: 0 }
   for (const f of folders) counts[f.id] = 0
   for (const m of meetings) {
@@ -158,9 +156,9 @@ function renderFolderPanel(): void {
       else counts.unassigned++
     }
   }
-  for (const el of $('meeting-folders').querySelectorAll<HTMLElement>('.folder-item')) {
+  for (const el of nav.querySelectorAll<HTMLElement>('[data-scope]')) {
     const s = el.dataset.scope
-    el.classList.toggle('active', s === scope)
+    el.classList.toggle('active', s === scope && !currentId)
     const n = s ? counts[s] : undefined
     ;(el.querySelector('.count') as HTMLElement | null)?.replaceChildren(String(n ?? ''))
   }
@@ -168,11 +166,11 @@ function renderFolderPanel(): void {
   box.innerHTML = ''
   for (const f of folders) {
     const el = document.createElement('button')
-    el.className = 'folder-item' + (scope === f.id ? ' active' : '')
+    el.className = 'meeting-scope folder' + (scope === f.id && !currentId ? ' active' : '')
     el.dataset.scope = f.id
-    const name = document.createElement('span')
-    name.className = 'name'
-    name.textContent = f.name
+    const nameEl = document.createElement('span')
+    nameEl.className = 'name'
+    nameEl.textContent = f.name
     const count = document.createElement('span')
     count.className = 'count'
     count.textContent = String(counts[f.id] ?? 0)
@@ -194,14 +192,19 @@ function renderFolderPanel(): void {
         } }
       ])
     })
-    el.addEventListener('click', () => {
-      scope = f.id
-      renderFolderPanel()
-      renderMeetingList()
-    })
-    el.append(name, count, menu)
+    el.addEventListener('click', () => goToList(f.id))
+    el.append(nameEl, count, menu)
     box.appendChild(el)
   }
+}
+
+/** 点分类：已在列表视图就刷新；在详情页或别的 hash 时回到列表（路由会触发 loadList） */
+function goToList(next: Scope): void {
+  scope = next
+  if (location.hash === '#meeting') {
+    renderMeetingNav()
+    renderMeetingList()
+  } else navigate('#meeting')
 }
 
 /** 新建 / 重命名文件夹的输入表单（popover 里） */
