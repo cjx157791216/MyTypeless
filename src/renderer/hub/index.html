@@ -34,9 +34,12 @@
             <svg viewBox="0 0 20 20"><path d="M5 3.5h8.5a1 1 0 0 1 1 1v12H6a1.5 1.5 0 0 1 0-3h8.5" /><path d="M8 7h4" /></svg>词典
           </button>
         </nav>
-        <!-- 会议模式的侧栏导航（D-050）：分类即导航，「全部会议」是入口 -->
+        <!-- 会议模式的侧栏导航（D-050）：「会议首页」是入口（开始会议 + 最近会议），分类按钮切换纯列表 -->
         <nav class="nav" data-for="meeting">
-          <button data-scope="all" class="meeting-scope has-icon">
+          <button data-scope="home" class="meeting-scope has-icon">
+            <svg viewBox="0 0 20 20"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-4.5h-4V17H4.5a1 1 0 0 1-1-1z" /></svg>会议首页
+          </button>
+          <button data-scope="all" class="meeting-scope">
             <svg viewBox="0 0 20 20"><circle cx="7" cy="7.5" r="2.5" /><circle cx="13.5" cy="8.5" r="2" /><path d="M2.5 16c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4M12 12.4c2.4-.3 4.3.9 5 3.6" /></svg>全部会议<span class="count"></span>
           </button>
           <button data-scope="unassigned" class="meeting-scope">未分类<span class="count"></span></button>
@@ -164,7 +167,7 @@
                 <h1>会议</h1>
                 <p class="sub">录下线下或线上会议，自动区分说话人，会后生成会议纪要</p>
               </div>
-              <div class="meeting-tools">
+              <div class="meeting-tools hidden" id="meeting-tools">
                 <input id="meeting-search" type="search" placeholder="搜索会议主题" />
                 <button id="btn-meeting-sort" class="btn mini" title="按创建时间排序">最新优先</button>
               </div>

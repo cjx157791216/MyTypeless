@@ -18,8 +18,8 @@ let navigate: (hash: string) => void = () => {}
 let reloadTimer: number | null = null
 
 // —— 文件夹与回收站（D-050）：列表视图的状态 ——
-type Scope = 'all' | 'unassigned' | 'trash' | string
-let scope: Scope = 'all'
+type Scope = 'home' | 'all' | 'unassigned' | 'trash' | string
+let scope: Scope = 'home' // 默认进会议首页：开始会议区域 + 最近会议
 let sortDesc = true
 let meetings: MeetingSummary[] = []
 let folders: MeetingFolder[] = []
@@ -236,13 +236,20 @@ function folderNamePopover(anchor: HTMLElement, initial: string, save: (name: st
 }
 
 function renderMeetingList(): void {
-  const q = ($('meeting-search') as HTMLInputElement).value.trim().toLowerCase()
-  const rows = meetings
-    .filter((m) => (scope === 'trash' ? !!m.deletedAt : !m.deletedAt && (scope === 'all' || (scope === 'unassigned' ? !m.folderId : m.folderId === scope))))
-    .filter((m) => !q || m.title.toLowerCase().includes(q))
-    .sort((a, b) => (sortDesc ? b.startedAt - a.startedAt : a.startedAt - b.startedAt))
+  const isHome = scope === 'home'
+  // 首页：开始会议区域 + 最近会议（不含回收站），没有搜索与筛选；分类视图是纯会议记录列表
+  const q = isHome ? '' : ($('meeting-search') as HTMLInputElement).value.trim().toLowerCase()
+  const rows = isHome
+    ? meetings.filter((m) => !m.deletedAt).sort((a, b) => b.startedAt - a.startedAt).slice(0, 5)
+    : meetings
+        .filter((m) => (scope === 'trash' ? !!m.deletedAt : !m.deletedAt && (scope === 'all' || (scope === 'unassigned' ? !m.folderId : m.folderId === scope))))
+        .filter((m) => !q || m.title.toLowerCase().includes(q))
+        .sort((a, b) => (sortDesc ? b.startedAt - a.startedAt : a.startedAt - b.startedAt))
   const list = $('meeting-list')
   list.innerHTML = ''
+  $('meeting-tools').classList.toggle('hidden', isHome)
+  $('meeting-start-card').classList.toggle('hidden', !isHome)
+  $('meeting-interrupted').classList.toggle('hidden', !isHome || !meetings.some((m) => m.status === 'interrupted' && !m.deletedAt))
   if (!rows.length) {
     const empty = document.createElement('div')
     empty.className = 'empty'
@@ -252,9 +259,7 @@ function renderMeetingList(): void {
         ? '回收站是空的'
         : scope === 'unassigned'
           ? '没有未分类的会议'
-          : scope === 'all'
-            ? '还没有会议记录'
-            : '此文件夹还没有会议'
+          : '还没有会议记录'
     list.appendChild(empty)
     return
   }
