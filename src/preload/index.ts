@@ -76,7 +76,10 @@ const api = {
     pushAudio: (buf: ArrayBuffer) => ipcRenderer.invoke(IPC.meetingAudioChunk, buf),
     list: () => ipcRenderer.invoke(IPC.meetingList),
     get: (id: string) => ipcRenderer.invoke(IPC.meetingGet, id),
-    remove: (id: string) => ipcRenderer.invoke(IPC.meetingDelete, id),
+    remove: (id: string) => ipcRenderer.invoke(IPC.meetingDelete, id), // 彻底删除（回收站里的会议也走这里，D-050）
+    trash: (id: string) => ipcRenderer.invoke(IPC.meetingTrash, id), // 移入回收站（软删除，D-050）
+    restore: (id: string) => ipcRenderer.invoke(IPC.meetingRestore, id),
+    moveToFolder: (id: string, folderId: string | null) => ipcRenderer.invoke(IPC.meetingMoveToFolder, id, folderId),
     setTitle: (id: string, title: string) => ipcRenderer.invoke(IPC.meetingSetTitle, id, title),
     renameSpeaker: (id: string, speakerId: number, name: string, remember: boolean) => ipcRenderer.invoke(IPC.meetingRenameSpeaker, id, speakerId, name, remember),
     assignSegment: (id: string, segmentId: number, speakerId: number | 'new') => ipcRenderer.invoke(IPC.meetingAssignSegment, id, segmentId, speakerId),
@@ -106,6 +109,12 @@ const api = {
       ipcRenderer.on(IPC.meetingCapture, listener)
       return () => ipcRenderer.removeListener(IPC.meetingCapture, listener)
     }
+  },
+  folders: {
+    list: () => ipcRenderer.invoke(IPC.folderList),
+    create: (name: string) => ipcRenderer.invoke(IPC.folderCreate, name),
+    rename: (id: string, name: string) => ipcRenderer.invoke(IPC.folderRename, id, name),
+    remove: (id: string) => ipcRenderer.invoke(IPC.folderDelete, id)
   },
   voiceprints: {
     list: () => ipcRenderer.invoke(IPC.voiceprintList),

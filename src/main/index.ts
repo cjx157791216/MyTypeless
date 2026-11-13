@@ -647,6 +647,18 @@ function registerIpc(): void {
   ipcMain.handle(IPC.meetingList, () => meetingStore.listMeetings())
   ipcMain.handle(IPC.meetingGet, (_e, id: string) => meetingStore.getMeetingDetail(id))
   ipcMain.handle(IPC.meetingDelete, (_e, id: string) => meeting.delete(id))
+  // 会议文件夹与回收站（D-050）
+  ipcMain.handle(IPC.folderList, () => meetingStore.listFolders())
+  ipcMain.handle(IPC.folderCreate, (_e, name: string) => meetingStore.createFolder(name))
+  ipcMain.handle(IPC.folderRename, (_e, id: string, name: string) => meetingStore.renameFolder(id, name))
+  ipcMain.handle(IPC.folderDelete, (_e, id: string) => meetingStore.deleteFolder(id))
+  ipcMain.handle(IPC.meetingMoveToFolder, (_e, id: string, folderId: string | null) => {
+    const ok = meetingStore.moveMeetingToFolder(id, folderId)
+    if (ok) onMeetingChanged(id)
+    return ok
+  })
+  ipcMain.handle(IPC.meetingTrash, (_e, id: string) => meeting.trash(id))
+  ipcMain.handle(IPC.meetingRestore, (_e, id: string) => meeting.restore(id))
   ipcMain.handle(IPC.meetingSetTitle, (_e, id: string, title: string) => {
     if (title.trim()) meetingStore.updateMeeting(id, { title: title.trim() })
     onMeetingChanged(id)

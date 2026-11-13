@@ -377,6 +377,14 @@ export const IPC = {
   meetingAudioDir: 'mt:meeting-audio-dir', // ('pick' | 'open')：选择会议录音的保存文件夹（返回选定的路径，取消为 null）/ 打开该文件夹（D-044）
   meetingRevealAudio: 'mt:meeting-reveal-audio', // (id) → boolean：在文件管理器里显示这场会议保存的录音；文件已不在时为 false
   meetingImport: 'mt:meeting-import', // ({ expectedSpeakers?, minutes? })：选一个 WAV 录音导入为会议（D-046）→ { ok, error?, meetingId?, canceled? }
+  // —— 会议文件夹与回收站（D-050）——
+  folderList: 'mt:folder-list', // → MeetingFolder[]（按创建时间升序）
+  folderCreate: 'mt:folder-create', // (name) → { folder, folders }：trim 后空名不建（folder 为 null）
+  folderRename: 'mt:folder-rename', // (id, name) → MeetingFolder[]
+  folderDelete: 'mt:folder-delete', // (id) → MeetingFolder[]：其中会议（含回收站里的）回到「未分类」，不删会议
+  meetingMoveToFolder: 'mt:meeting-move-to-folder', // (id, folderId | null) → boolean：null = 移到「未分类」；目标不存在或会议在回收站中为 false
+  meetingTrash: 'mt:meeting-trash', // (id) → boolean：移入回收站（软删除，只标记不删数据）；进行中或整理中 false
+  meetingRestore: 'mt:meeting-restore', // (id) → boolean：从回收站恢复（回到原文件夹）
   voiceprintList: 'mt:voiceprint-list',
   voiceprintRename: 'mt:voiceprint-rename',
   voiceprintDelete: 'mt:voiceprint-delete',
