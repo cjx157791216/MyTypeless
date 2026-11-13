@@ -249,6 +249,7 @@ function renderMeetingList(): void {
   list.innerHTML = ''
   $('meeting-tools').classList.toggle('hidden', isHome)
   $('meeting-start-card').classList.toggle('hidden', !isHome)
+  $('meeting-recent-head').classList.toggle('hidden', !isHome)
   $('meeting-interrupted').classList.toggle('hidden', !isHome || !meetings.some((m) => m.status === 'interrupted' && !m.deletedAt))
   if (!rows.length) {
     const empty = document.createElement('div')

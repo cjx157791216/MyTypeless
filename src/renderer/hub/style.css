@@ -263,6 +263,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .folder-name-form input { width: 150px; }
 .meeting-tools { display: flex; gap: 8px; align-items: center; }
 .meeting-tools input[type='search'] { width: 190px; }
+.meeting-recent-head { margin: 2px 0 -6px; }
+.meeting-recent-head h3 { font-size: 13px; font-weight: 650; margin: 0; }
 .meeting-list { display: flex; flex-direction: column; gap: 8px; }
 .meeting-item {
   background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
