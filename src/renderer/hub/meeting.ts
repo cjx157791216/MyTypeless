@@ -201,10 +201,8 @@ function renderMeetingNav(): void {
 /** 点分类：已在列表视图就刷新；在详情页或别的 hash 时回到列表（路由会触发 loadList） */
 function goToList(next: Scope): void {
   scope = next
-  if (location.hash === '#meeting') {
-    renderMeetingNav()
-    renderMeetingList()
-  } else navigate('#meeting')
+  if (location.hash === '#meeting') void loadList() // 重拉会议与文件夹（新建/重命名后侧栏数据是旧的）
+  else navigate('#meeting')
 }
 
 /** 新建 / 重命名文件夹的输入表单（popover 里） */
