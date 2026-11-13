@@ -244,12 +244,41 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .source-row #meeting-app { flex: 1; }
 .speaker-bar .track-label { font-size: 12px; color: var(--muted); margin: 0 2px 0 6px; }
 .speaker-bar .track-label:first-child { margin-left: 0; }
+/* 会议模式侧栏分类（D-050）：直接用 .nav button 的基础样式，这里只补计数、截断与子项 */
+.meeting-scope .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meeting-scope .count { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.meeting-scope.active .count { color: var(--fg); }
+.meeting-scope.folder { padding-left: 24px; }
+.meeting-scope.folder-new { color: var(--faint); font-size: 12.5px; padding: 5px 10px 5px 24px; }
+.meeting-scope.folder-new:hover { color: var(--fg); }
+.folder-items { display: flex; flex-direction: column; gap: 2px; }
+.meeting-scope .item-menu {
+  border: none; background: transparent; color: var(--faint); font: inherit; font-size: 14px; line-height: 1;
+  padding: 2px 5px; border-radius: 6px; cursor: pointer; opacity: 0; flex-shrink: 0; margin-left: 4px;
+}
+.meeting-scope:hover .item-menu, .meeting-scope .item-menu:focus-visible { opacity: 1; }
+.meeting-scope .item-menu:hover { background: rgba(0, 0, 0, 0.06); color: var(--fg); }
+@media (prefers-color-scheme: dark) { .meeting-scope .item-menu:hover { background: rgba(255, 255, 255, 0.07); } }
+.folder-name-form { display: flex; gap: 6px; padding: 4px; }
+.folder-name-form input { width: 150px; }
+.meeting-tools { display: flex; gap: 8px; align-items: center; }
+.meeting-tools input[type='search'] { width: 190px; }
+.meeting-recent-head { margin: 2px 0 -6px; }
+.meeting-recent-head h3 { font-size: 13px; font-weight: 650; margin: 0; }
 .meeting-list { display: flex; flex-direction: column; gap: 8px; }
 .meeting-item {
   background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
   padding: 13px 16px; display: flex; align-items: center; gap: 14px; cursor: pointer;
 }
 .meeting-item:hover { border-color: var(--border-strong); }
+.meeting-item .item-menu {
+  border: none; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer; opacity: 0; flex-shrink: 0;
+}
+.meeting-item:hover .item-menu { opacity: 1; }
+.meeting-item .item-menu:hover { background: var(--bg); color: var(--fg); }
+.meeting-item.trash-row { cursor: default; }
+.meeting-item .trash-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .meeting-item .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .meeting-item .title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meeting-item .meta { font-size: 12px; color: var(--muted); }

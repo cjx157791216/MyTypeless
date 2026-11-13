@@ -58,7 +58,11 @@ async function route(): Promise<void> {
   else if (page === 'meeting') await showMeetingPage(arg)
 }
 
-for (const b of document.querySelectorAll<HTMLButtonElement>('.nav button')) b.addEventListener('click', () => navigate(`#${b.dataset.page}`))
+for (const b of document.querySelectorAll<HTMLButtonElement>('.nav button')) {
+  // 没有 data-page 的按钮（会议侧栏的分类、新建文件夹等，D-050）有自己的点击行为，不按页面跳转
+  if (!b.dataset.page) continue
+  b.addEventListener('click', () => navigate(`#${b.dataset.page}`))
+}
 for (const b of document.querySelectorAll<HTMLButtonElement>('.mode-switch button')) {
   b.addEventListener('click', () => navigate(b.dataset.mode === 'meeting' ? '#meeting' : '#home'))
 }

@@ -180,6 +180,23 @@ export interface MeetingSummary {
   status: MeetingStatus
   speakers: string[]
   hasMinutes: boolean
+  /** 所属文件夹（D-050）；null = 未分类 */
+  folderId: string | null
+  /** 移入回收站的时间戳（D-050）；null = 正常。列表返回全部（含回收站），侧栏计数与过滤用 */
+  deletedAt: number | null
+}
+
+/** 会议文件夹（D-050）：用户自建的归类，一个会议只在一个文件夹里 */
+export interface MeetingFolder {
+  id: string
+  name: string
+  createdAt: number
+}
+
+/** 新建文件夹的返回：新建的项（便于选中）+ 最新列表 */
+export interface MeetingFolderCreated {
+  folder: MeetingFolder | null
+  folders: MeetingFolder[]
 }
 
 /** 会议图表（D-048）：内容分析从纪要里提炼的 Mermaid 图（流程 / 架构 / 时序等），没有则不出「图表」标签 */
@@ -360,6 +377,14 @@ export const IPC = {
   meetingAudioDir: 'mt:meeting-audio-dir', // ('pick' | 'open')：选择会议录音的保存文件夹（返回选定的路径，取消为 null）/ 打开该文件夹（D-044）
   meetingRevealAudio: 'mt:meeting-reveal-audio', // (id) → boolean：在文件管理器里显示这场会议保存的录音；文件已不在时为 false
   meetingImport: 'mt:meeting-import', // ({ expectedSpeakers?, minutes? })：选一个 WAV 录音导入为会议（D-046）→ { ok, error?, meetingId?, canceled? }
+  // —— 会议文件夹与回收站（D-050）——
+  folderList: 'mt:folder-list', // → MeetingFolder[]（按创建时间升序）
+  folderCreate: 'mt:folder-create', // (name) → { folder, folders }：trim 后空名不建（folder 为 null）
+  folderRename: 'mt:folder-rename', // (id, name) → MeetingFolder[]
+  folderDelete: 'mt:folder-delete', // (id) → MeetingFolder[]：其中会议（含回收站里的）回到「未分类」，不删会议
+  meetingMoveToFolder: 'mt:meeting-move-to-folder', // (id, folderId | null) → boolean：null = 移到「未分类」；目标不存在或会议在回收站中为 false
+  meetingTrash: 'mt:meeting-trash', // (id) → boolean：移入回收站（软删除，只标记不删数据）；进行中或整理中 false
+  meetingRestore: 'mt:meeting-restore', // (id) → boolean：从回收站恢复（回到原文件夹）
   voiceprintList: 'mt:voiceprint-list',
   voiceprintRename: 'mt:voiceprint-rename',
   voiceprintDelete: 'mt:voiceprint-delete',

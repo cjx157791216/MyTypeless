@@ -6,6 +6,8 @@ import type {
   HistoryRecord,
   HistoryStats,
   MeetingDetail,
+  MeetingFolder,
+  MeetingFolderCreated,
   MeetingLive,
   MeetingStartOptions,
   MeetingSummary,
@@ -85,7 +87,14 @@ export interface MyTypelessBridge {
     pushAudio(buf: ArrayBuffer): Promise<void>
     list(): Promise<MeetingSummary[]>
     get(id: string): Promise<MeetingDetail | null>
+    /** 彻底删除（回收站里的会议也走这里，D-050）；进行中或整理中返回 false */
     remove(id: string): Promise<boolean>
+    /** 移入回收站（软删除，只标记不删数据，D-050）；进行中或整理中返回 false */
+    trash(id: string): Promise<boolean>
+    /** 从回收站恢复（回到原文件夹） */
+    restore(id: string): Promise<boolean>
+    /** 移动到文件夹（folderId 为 null = 移到「未分类」）；目标不存在或会议在回收站中为 false */
+    moveToFolder(id: string, folderId: string | null): Promise<boolean>
     setTitle(id: string, title: string): Promise<void>
     renameSpeaker(id: string, speakerId: number, name: string, remember: boolean): Promise<{ remembered: boolean }>
     assignSegment(id: string, segmentId: number, speakerId: number | 'new'): Promise<void>
@@ -109,6 +118,15 @@ export interface MyTypelessBridge {
     onLive(cb: (live: MeetingLive) => void): () => void
     onChanged(cb: (meetingId: string) => void): () => void
     onCapture(cb: (c: { on: boolean; micDeviceId: string }) => void): () => void
+  }
+  /** 会议文件夹（D-050）：用户自建的归类，一个会议只在一个文件夹里 */
+  folders: {
+    list(): Promise<MeetingFolder[]>
+    /** 新建（trim 后空名不建，folder 为 null）；返回新建项与最新列表 */
+    create(name: string): Promise<MeetingFolderCreated>
+    rename(id: string, name: string): Promise<MeetingFolder[]>
+    /** 删除文件夹：其中会议（含回收站里的）全部回到「未分类」，不删会议 */
+    remove(id: string): Promise<MeetingFolder[]>
   }
   voiceprints: {
     list(): Promise<Voiceprint[]>

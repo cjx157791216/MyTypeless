@@ -34,10 +34,18 @@
             <svg viewBox="0 0 20 20"><path d="M5 3.5h8.5a1 1 0 0 1 1 1v12H6a1.5 1.5 0 0 1 0-3h8.5" /><path d="M8 7h4" /></svg>词典
           </button>
         </nav>
+        <!-- 会议模式的侧栏导航（D-050）：「会议首页」是入口（开始会议 + 最近会议），分类按钮切换纯列表 -->
         <nav class="nav" data-for="meeting">
-          <button data-page="meeting">
-            <svg viewBox="0 0 20 20"><circle cx="7" cy="7.5" r="2.5" /><circle cx="13.5" cy="8.5" r="2" /><path d="M2.5 16c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4M12 12.4c2.4-.3 4.3.9 5 3.6" /></svg>会议
+          <button data-scope="home" class="meeting-scope has-icon">
+            <svg viewBox="0 0 20 20"><path d="M3.5 9 10 3.5 16.5 9v7a1 1 0 0 1-1 1h-3.5v-4.5h-4V17H4.5a1 1 0 0 1-1-1z" /></svg>会议首页
           </button>
+          <button data-scope="all" class="meeting-scope">
+            <svg viewBox="0 0 20 20"><circle cx="7" cy="7.5" r="2.5" /><circle cx="13.5" cy="8.5" r="2" /><path d="M2.5 16c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4M12 12.4c2.4-.3 4.3.9 5 3.6" /></svg>全部会议<span class="count"></span>
+          </button>
+          <button data-scope="unassigned" class="meeting-scope">未分类<span class="count"></span></button>
+          <div id="folder-items" class="folder-items"></div>
+          <button id="btn-folder-new" class="meeting-scope folder-new">＋ 新建文件夹</button>
+          <button data-scope="trash" class="meeting-scope">回收站<span class="count"></span></button>
         </nav>
         <div class="sidebar-live hidden" id="sidebar-live">
           <i class="rec-dot"></i><span id="sidebar-live-text">会议中</span>
@@ -151,7 +159,7 @@
           </div>
         </section>
 
-        <!-- 会议（D-015） -->
+        <!-- 会议（D-015）：左侧文件夹面板 + 右侧列表（D-050） -->
         <section class="page" id="page-meeting">
           <div id="meeting-list-view">
             <header class="page-head">
@@ -159,10 +167,13 @@
                 <h1>会议</h1>
                 <p class="sub">录下线下或线上会议，自动区分说话人，会后生成会议纪要</p>
               </div>
+              <div class="meeting-tools hidden" id="meeting-tools">
+                <input id="meeting-search" type="search" placeholder="搜索会议主题" />
+                <button id="btn-meeting-sort" class="btn mini" title="按创建时间排序">最新优先</button>
+              </div>
             </header>
             <div id="meeting-interrupted"></div>
-            <div class="card start-card" id="meeting-start-card">
-              <div class="start-row">
+            <div class="card start-card" id="meeting-start-card">              <div class="start-row">
                 <input id="meeting-title" type="text" placeholder="会议主题（可选）" />
                 <button id="btn-meeting-start" class="btn primary">
                   <i class="rec-dot static"></i>开始会议
@@ -185,6 +196,7 @@
               <div class="hint">选好人数（会中、会后都能再改），说话人按这个人数和声音区分，之后随时可以改名。录音前请告知参会者正在录音转写；<span id="meeting-audio-note">录音只在本机临时保存，整理完自动删除。</span>会议进行中 <span class="main-key">Fn</span> 听写暂停。</div>
               <div class="hint" id="meeting-start-state"></div>
             </div>
+            <div class="card-head meeting-recent-head hidden" id="meeting-recent-head"><h3>最近</h3></div>
             <div id="meeting-list" class="meeting-list"></div>
           </div>
 

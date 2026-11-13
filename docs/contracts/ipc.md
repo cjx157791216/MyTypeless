@@ -38,8 +38,8 @@
 | `meetingRequestStop` | `meeting.requestStop()` | 浮动条用：主进程弹系统对话框「生成纪要 / 只保存记录 / 继续开会」 |
 | `meetingGetLive` | `meeting.getLive()` | → 当前 `MeetingLive` |
 | `meetingAudioChunk` | `meeting.pushAudio(buf)` | 浮动条 → 主进程：会议麦克风录音分片（16kHz 单声道 Int16，约 100ms）；暂停时、只用应用声音时忽略 |
-| `meetingList` / `meetingGet` | `meeting.list()` / `meeting.get(id)` | → `MeetingSummary[]`（按开始时间倒序）/ `MeetingDetail \| null` |
-| `meetingDelete` | `meeting.remove(id)` | 删除会议的文字、说话人与残留的临时录音 → `boolean`（进行中或整理中返回 false） |
+| `meetingList` / `meetingGet` | `meeting.list()` / `meeting.get(id)` | → `MeetingSummary[]`（按开始时间倒序，含回收站里的会议；`folderId` / `deletedAt` 供侧栏计数与过滤，D-050）/ `MeetingDetail \| null` |
+| `meetingDelete` | `meeting.remove(id)` | 彻底删除会议的文字、说话人与残留的临时录音 → `boolean`（进行中或整理中返回 false）；回收站里的会议从此通道彻底删除（D-050） |
 | `meetingSetTitle` | `meeting.setTitle(id, title)` | 改会议主题 |
 | `meetingRenameSpeaker` | `meeting.renameSpeaker(id, speakerId, name, remember)` | 改名；`remember` 时保存/更新声纹（D-016）→ `{ remembered }`（没有声音特征时为 false） |
 | `meetingAssignSegment` | `meeting.assignSegment(id, segmentId, speakerId \| 'new')` | 把一句话改归某人或新说话人（标记为手动，整理时不再改动） |
@@ -53,6 +53,9 @@
 | `meetingAudioDir` | `meeting.audioDir(action)` | 会议录音的保存文件夹（D-044）：`pick` 弹出选择框并写入设置 `meetingAudioDir` → 选定的路径，取消为 `null`；`open` 在文件管理器里打开 → 路径，文件夹不存在为 `null` |
 | `meetingRevealAudio` | `meeting.revealAudio(id)` | 在文件管理器里选中这场会议保存的录音 → `boolean`（没保存或文件已不在为 `false`） |
 | `meetingImport` | `meeting.importRecording(opts?)` | 导入录音（D-046）：`{ expectedSpeakers?, minutes? }`；弹出选择框选一个 WAV / MP3（默认打开会议录音的保存文件夹），读完文件头、建好会议即返回 `{ ok, error?, meetingId?, canceled? }`（取消选择为 `canceled: true`），之后在后台转写与整理（进度经 `meetingLive` 的 `processing` 推送）；会议进行中、有会议正在整理、文件不是支持的录音格式、内置识别模型未下载时拒绝 |
+| `folderList` / `folderCreate` / `folderRename` / `folderDelete` | `folders.list/create/rename/remove` | 会议文件夹（D-050）：`list` → `MeetingFolder[]`（按创建时间升序）；`create(name)` → `{ folder, folders }`（trim 后空名不建）；`rename(id, name)` / `remove(id)` → 最新 `MeetingFolder[]`；删除文件夹时其中会议（含回收站里的）全部回到「未分类」，不删会议 |
+| `meetingMoveToFolder` | `meeting.moveToFolder(id, folderId)` | 把会议移到文件夹（`folderId` 为 `null` = 移到「未分类」）→ `boolean`（目标文件夹不存在或会议在回收站中为 false） |
+| `meetingTrash` / `meetingRestore` | `meeting.trash(id)` / `meeting.restore(id)` | 移入回收站（软删除，只标记不删数据）/ 恢复 → `boolean`（进行中或整理中不能移入；重复移入、恢复不在回收站的会议为 false）；恢复后回到原文件夹 |
 | `speakerModelAction` | `voiceprints.model(action)` | `'download' \| 'cancel' \| 'remove'` → `{ ok, error? }`；进度与状态经 `meetingLive.speakerModel` / `speakerModelProgress` 推送；会议进行或整理中不能删除 |
 | `voiceprintList` / `voiceprintRename` / `voiceprintDelete` | `voiceprints.list/rename/remove` | → 最新 `Voiceprint[]`；改名同步到关联的说话人，删除立即生效（D-016） |
 | `styleSampleList` / `styleSampleDelete` / `styleSampleClear` | `styleSamples.list/remove/clear` | → 最新 `StyleSample[]`（从新到旧）；删除、清空立即生效（D-041） |

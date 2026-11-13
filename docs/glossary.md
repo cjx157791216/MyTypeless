@@ -57,6 +57,8 @@
 | 句内换人检测 | `turns`、`splitByTurns`、`turnsInUtterance` | 一句话内部找出换人的位置并按人切开（带前 8 秒参考录音）；切开后同一人的相邻段合回（`mergeAdjacentParts`） | D-019 |
 | 中文高精度识别 | `firered2-aed-int8`、`fireredEngine`、`fixAsrCase` | 内置识别的 FireRedASR2 + 标点模型，由 mt-diarize 运行；英文大小写按词典与常见缩写恢复 | D-027 |
 | 声纹模型标识 | `EMBED_MODEL`、`meetings.embed_model`、`voiceprints.model` | 不同声纹模型的向量不可比较；会议与声纹记下所用模型 | D-026 |
+| 会议文件夹 | `MeetingFolder`、`meeting_folders` 表、`folders` API | 用户自建的会议归类（互斥归属，一个会议只在一个文件夹）；未归类的在「未分类」 | D-050 |
+| 回收站 | `meetings.deleted_at`、`meeting.trash/restore` | 软删除的会议存放处：只标记不删数据，可恢复；「彻底删除」才清文字、说话人与临时录音 | D-050 |
 | 按窗口找换人 | `splitByWindows`、`WINDOW_MS` | 已区分出各人后，句内每 0.5 秒取 1.5 秒与各人比较，在归属变化处切开 | D-025 |
 | 边录边降噪 | `denoiser`、`dnfeed`、`MEETING_VAD_DENOISED` | 会议录音用 GTCRN 流式降噪，降噪后的声音只用于分句（识别、声纹用原始录音） | D-024 |
 | 音量归一 | `normalizeLoudness` | 识别前把一句话放大到正常说话的音量（最多 30 dB、不削顶） | D-024 |
@@ -128,6 +130,7 @@
 | 润色 / 本地清理 | 润色调用 LLM；本地清理只用规则，在未配置 LLM 或润色失败时使用 | [pipeline.md](requirements/pipeline.md) |
 | 内置引擎 / 自建 whisper.cpp 服务 | 内置引擎由应用自带并自动管理；自建服务是用户自己运行、填写地址的 whisper.cpp（高级选项） | [external-services.md](contracts/external-services.md) |
 | 免手持 / 兜底模式 | 免手持是用户轻按主键主动选择的；兜底模式是原生助手不可用时的被动退化 | [native.md](requirements/native.md) |
+| 删除 / 彻底删除（会议） | 删除是移入回收站（软删除，可恢复）；彻底删除才清文字、说话人与临时录音（用户另存的录音两种都不删） | D-050 |
 
 ## 废弃说法
 

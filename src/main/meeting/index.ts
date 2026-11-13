@@ -771,11 +771,26 @@ export class MeetingManager {
     return { ok: true }
   }
 
-  /** 删除会议（进行中的会议不能删） */
+  /** 彻底删除会议（进行中的会议不能删；回收站里的会议由此删除，D-050） */
   delete(meetingId: string): boolean {
     if (this.active?.id === meetingId || this.processing?.id === meetingId) return false
     for (const path of store.deleteMeeting(meetingId)) removeFile(path)
     this.minutesCache.delete(meetingId)
+    return true
+  }
+
+  /** 移入回收站（软删除，只标记不删数据，D-050）；进行中或整理中不能移入 */
+  trash(meetingId: string): boolean {
+    if (this.active?.id === meetingId || this.processing?.id === meetingId) return false
+    if (!store.trashMeeting(meetingId)) return false
+    this.hooks.onChanged(meetingId)
+    return true
+  }
+
+  /** 从回收站恢复（回到原文件夹，D-050） */
+  restore(meetingId: string): boolean {
+    if (!store.restoreMeeting(meetingId)) return false
+    this.hooks.onChanged(meetingId)
     return true
   }
 

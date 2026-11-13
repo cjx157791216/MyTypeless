@@ -1,15 +1,47 @@
 import { randomUUID } from 'crypto'
-import { database } from '../history'
-import type { MeetingDetail, MeetingDiagram, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingStatus, MeetingSummary, MeetingTrack, Voiceprint } from '../../shared/types'
-import { SAMPLE_RATE } from '../live'
-import { EMBED_MODEL } from './cluster'
+import type { MeetingDetail, MeetingDiagram, MeetingFolder, MeetingSegment, MeetingSource, MeetingSpeaker, MeetingStatus, MeetingSummary, MeetingTrack, Voiceprint } from '../../shared/types'
+import { SAMPLE_RATE } from '../live.ts'
+import { EMBED_MODEL } from './cluster.ts'
 
 /**
  * 会议存储（D-015、D-016）：会议、说话人（含每人一个声音特征向量）、按句的转写、已保存的声纹。
  * 表结构见 `history.ts`；录音不进数据库（临时文件路径记在 meetings.audio_path / app_audio_path，整理完删除；
  * 用户开启保存会议录音时另存的 WAV 路径记在 saved_audio_path，D-044）。
  * 线上会议（D-033）分两路：track 0 = 麦克风（现场），1 = 应用声音（线上）；说话人与句子各属一路，两路各自区分说话人、各自编号。
+ * 连接由 `initMeetingStore` 注入（不直接依赖 electron，可被 test/ 用 node:sqlite 内存库导入；history.ts 在 open() 里注入）。
  */
+
+/** store 用到的 better-sqlite3 / node:sqlite 公共子集（better-sqlite3 的 Database 结构上满足它） */
+export interface SqlConn {
+  exec(sql: string): void
+  prepare(sql: string): { run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint }; get(...params: unknown[]): unknown; all(...params: unknown[]): unknown[] }
+  transaction<T>(fn: () => T): () => T
+}
+
+let conn: SqlConn | null = null
+
+/** 注入数据库连接；必须在第一次使用前调用（src/main/index.ts 的 whenReady 开头） */
+export function initMeetingStore(d: SqlConn): void {
+  conn = d
+}
+
+function db(): SqlConn {
+  if (!conn) throw new Error('会议存储未初始化：先调用 initMeetingStore')
+  return conn
+}
+
+/** 会议文件夹与回收站的表结构（D-050）：history.ts 的 open() 在 migrateColumns() 之后调用，幂等 */
+export function ensureFolderSchema(d: SqlConn): void {
+  d.exec(`CREATE TABLE IF NOT EXISTS meeting_folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`)
+  const cols = new Set((d.prepare(`PRAGMA table_info(meetings)`).all() as Array<{ name: string }>).map((c) => c.name))
+  if (!cols.has('folder_id')) d.exec(`ALTER TABLE meetings ADD COLUMN folder_id TEXT`) // NULL = 未分类；旧行加列后自动 NULL，无需回填
+  if (!cols.has('deleted_at')) d.exec(`ALTER TABLE meetings ADD COLUMN deleted_at INTEGER`) // NULL = 正常；非 NULL = 移入回收站的时间戳（软删除）
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_meetings_folder ON meetings(folder_id)`)
+}
 
 const ms = (samples: number) => Math.round((samples / SAMPLE_RATE) * 1000)
 
@@ -41,6 +73,8 @@ export interface MeetingRow {
   expected_remote: number | null // 线上人数
   saved_audio_path: string | null // 保存下来的会议录音（D-044，用户的文件，删除会议时不删）
   diagrams: string | null // 内容分析生成的图表（D-048），JSON 数组 [{ title, code }]；没有为 NULL
+  folder_id: string | null // 所属文件夹（D-050）；NULL = 未分类
+  deleted_at: number | null // 移入回收站的时间戳（D-050）；NULL = 正常
 }
 
 export interface SpeakerRow {
@@ -75,7 +109,7 @@ export function createMeeting(m: {
   expectedRemote?: number | null
 }): string {
   const id = randomUUID()
-  database()
+  db()
     .prepare(
       `INSERT INTO meetings (id, title, started_at, status, expected_speakers, audio_path, embed_model, source, app_audio_path, app_name, expected_remote)
        VALUES (?, ?, ?, 'recording', ?, ?, ?, ?, ?, ?, ?)`
@@ -91,7 +125,7 @@ export function usesCurrentModel(id: string): boolean {
 
 /** 旧模型的会议重新整理时：清掉旧声纹，改由当前模型从临时录音重算 */
 export function resetEmbeddings(id: string): void {
-  const d = database()
+  const d = db()
   d.prepare(`UPDATE meeting_segments SET embedding = NULL WHERE meeting_id = ?`).run(id)
   d.prepare(`UPDATE meeting_speakers SET centroid = NULL, voiceprint_id = NULL WHERE meeting_id = ?`).run(id)
   d.prepare(`UPDATE meetings SET embed_model = ? WHERE id = ?`).run(EMBED_MODEL, id)
@@ -131,18 +165,18 @@ export function updateMeeting(
   const keys = Object.keys(patch).filter((k) => k in cols)
   if (!keys.length) return
   const sql = `UPDATE meetings SET ${keys.map((k) => `${cols[k]} = ?`).join(', ')} WHERE id = ?`
-  database()
+  db()
     .prepare(sql)
     .run(...keys.map((k) => (patch as Record<string, unknown>)[k] ?? null), id)
 }
 
 export function getMeetingRow(id: string): MeetingRow | null {
-  return (database().prepare(`SELECT * FROM meetings WHERE id = ?`).get(id) as MeetingRow | undefined) ?? null
+  return (db().prepare(`SELECT * FROM meetings WHERE id = ?`).get(id) as MeetingRow | undefined) ?? null
 }
 
-/** 异常中断（进行中或整理中）的会议 */
+/** 异常中断（进行中或整理中）的会议；回收站里的脏数据（理论上不该存在，防御）不捞回 */
 export function unfinishedMeetings(): MeetingRow[] {
-  return database().prepare(`SELECT * FROM meetings WHERE status IN ('recording', 'paused', 'processing')`).all() as MeetingRow[]
+  return db().prepare(`SELECT * FROM meetings WHERE status IN ('recording', 'paused', 'processing') AND deleted_at IS NULL`).all() as MeetingRow[]
 }
 
 /** 默认名：只有一路声音时「说话人 N」；麦克风 + 应用声音时分「现场 N」「线上 N」（D-033） */
@@ -160,8 +194,8 @@ export function trackPaths(r: Pick<MeetingRow, 'source' | 'audio_path' | 'app_au
 }
 
 export function listMeetings(): MeetingSummary[] {
-  const rows = database().prepare(`SELECT * FROM meetings ORDER BY started_at DESC`).all() as MeetingRow[]
-  const speakerStmt = database().prepare(
+  const rows = db().prepare(`SELECT * FROM meetings ORDER BY started_at DESC`).all() as MeetingRow[]
+  const speakerStmt = db().prepare(
     `SELECT s.label, s.name, s.track FROM meeting_speakers s
      WHERE s.meeting_id = ? AND EXISTS (SELECT 1 FROM meeting_segments g WHERE g.speaker_id = s.id)
      ORDER BY s.track, s.label`
@@ -174,7 +208,9 @@ export function listMeetings(): MeetingSummary[] {
     durationMs: r.duration_ms,
     status: r.status,
     speakers: (speakerStmt.all(r.id) as Array<{ label: number; name: string | null; track: number }>).map((s) => displayName(s, r.source)),
-    hasMinutes: !!r.minutes
+    hasMinutes: !!r.minutes,
+    folderId: r.folder_id ?? null,
+    deletedAt: r.deleted_at ?? null
   }))
 }
 
@@ -233,6 +269,8 @@ export function getMeetingDetail(id: string): MeetingDetail | null {
     status: r.status,
     speakers: speakerList.map((s) => s.displayName),
     hasMinutes: !!r.minutes,
+    folderId: r.folder_id ?? null,
+    deletedAt: r.deleted_at ?? null,
     source: r.source,
     appName: r.app_name,
     expectedSpeakers: r.expected_speakers,
@@ -246,11 +284,11 @@ export function getMeetingDetail(id: string): MeetingDetail | null {
   }
 }
 
-/** 删除会议的全部数据；返回临时录音路径（由调用方删除文件） */
+/** 彻底删除会议的全部数据（D-050：回收站里的会议也走这里）；返回临时录音路径（由调用方删除文件），用户另存的录音不删 */
 export function deleteMeeting(id: string): string[] {
   const row = getMeetingRow(id)
   const audio = [row?.audio_path, row?.app_audio_path].filter((p): p is string => !!p)
-  const d = database()
+  const d = db()
   d.transaction(() => {
     d.prepare(`DELETE FROM meeting_segments WHERE meeting_id = ?`).run(id)
     d.prepare(`DELETE FROM meeting_speakers WHERE meeting_id = ?`).run(id)
@@ -259,22 +297,79 @@ export function deleteMeeting(id: string): string[] {
   return audio
 }
 
+// —— 会议文件夹与回收站（D-050）——
+
+export function listFolders(): MeetingFolder[] {
+  return (db()
+    .prepare(`SELECT id, name, created_at FROM meeting_folders ORDER BY created_at, rowid`)
+    .all() as Array<{ id: string; name: string; created_at: number }>).map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at }))
+}
+
+/** 新建文件夹：trim 后空名不建（folder 为 null）；列表照 dictAdd 模式返回最新，UI 便于选中新建项 */
+export function createFolder(name: string): { folder: MeetingFolder | null; folders: MeetingFolder[] } {
+  const trimmed = name.trim()
+  if (!trimmed) return { folder: null, folders: listFolders() }
+  const folder: MeetingFolder = { id: randomUUID(), name: trimmed, createdAt: Date.now() }
+  db().prepare(`INSERT INTO meeting_folders (id, name, created_at) VALUES (?, ?, ?)`).run(folder.id, folder.name, folder.createdAt)
+  return { folder, folders: listFolders() }
+}
+
+export function renameFolder(id: string, name: string): MeetingFolder[] {
+  const trimmed = name.trim()
+  if (trimmed) db().prepare(`UPDATE meeting_folders SET name = ? WHERE id = ?`).run(trimmed, id)
+  return listFolders()
+}
+
+/** 删除文件夹：其中所有会议（含回收站里的）回到「未分类」，不删会议 */
+export function deleteFolder(id: string): MeetingFolder[] {
+  const d = db()
+  d.transaction(() => {
+    d.prepare(`UPDATE meetings SET folder_id = NULL WHERE folder_id = ?`).run(id)
+    d.prepare(`DELETE FROM meeting_folders WHERE id = ?`).run(id)
+  })()
+  return listFolders()
+}
+
+/** 移动会议到文件夹（folderId 为 null = 移到「未分类」）；目标不存在或会议在回收站中为 false */
+export function moveMeetingToFolder(meetingId: string, folderId: string | null): boolean {
+  const r = getMeetingRow(meetingId)
+  if (!r || r.deleted_at !== null) return false
+  if (folderId !== null && !db().prepare(`SELECT 1 FROM meeting_folders WHERE id = ?`).get(folderId)) return false
+  db().prepare(`UPDATE meetings SET folder_id = ? WHERE id = ?`).run(folderId, meetingId)
+  return true
+}
+
+/** 移入回收站（软删除，只置 deleted_at，folder_id 保留——恢复回原文件夹）；进行中或整理中 false */
+export function trashMeeting(id: string): boolean {
+  const r = getMeetingRow(id)
+  if (!r || r.deleted_at !== null) return false
+  if (r.status === 'recording' || r.status === 'paused' || r.status === 'processing') return false
+  db().prepare(`UPDATE meetings SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`).run(Date.now(), id)
+  return true
+}
+
+/** 从回收站恢复；不在回收站中的会议 false */
+export function restoreMeeting(id: string): boolean {
+  const info = db().prepare(`UPDATE meetings SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`).run(id)
+  return Number(info.changes) > 0
+}
+
 // —— 说话人 ——
 
 export function listSpeakers(meetingId: string): SpeakerRow[] {
-  const rows = database().prepare(`SELECT * FROM meeting_speakers WHERE meeting_id = ? ORDER BY track, label`).all(meetingId) as Array<
+  const rows = db().prepare(`SELECT * FROM meeting_speakers WHERE meeting_id = ? ORDER BY track, label`).all(meetingId) as Array<
     Omit<SpeakerRow, 'centroid'> & { centroid: Buffer | null }
   >
   return rows.map((r) => ({ ...r, centroid: fromBlob(r.centroid) }))
 }
 
 export function getSpeaker(id: number): SpeakerRow | null {
-  const r = database().prepare(`SELECT * FROM meeting_speakers WHERE id = ?`).get(id) as (Omit<SpeakerRow, 'centroid'> & { centroid: Buffer | null }) | undefined
+  const r = db().prepare(`SELECT * FROM meeting_speakers WHERE id = ?`).get(id) as (Omit<SpeakerRow, 'centroid'> & { centroid: Buffer | null }) | undefined
   return r ? { ...r, centroid: fromBlob(r.centroid) } : null
 }
 
 export function addSpeaker(meetingId: string, track: MeetingTrack = 0, name: string | null = null, voiceprintId: number | null = null): number {
-  const d = database()
+  const d = db()
   const next = (d.prepare(`SELECT COALESCE(MAX(label), 0) + 1 AS n FROM meeting_speakers WHERE meeting_id = ? AND track = ?`).get(meetingId, track) as { n: number }).n
   const info = d
     .prepare(`INSERT INTO meeting_speakers (meeting_id, label, name, voiceprint_id, track) VALUES (?, ?, ?, ?, ?)`)
@@ -286,7 +381,7 @@ export function updateSpeaker(
   id: number,
   patch: Partial<{ name: string | null; voiceprintId: number | null; centroid: Float32Array | null; autoNamed: boolean }>
 ): void {
-  const d = database()
+  const d = db()
   if ('name' in patch) d.prepare(`UPDATE meeting_speakers SET name = ? WHERE id = ?`).run(patch.name, id)
   if ('voiceprintId' in patch) d.prepare(`UPDATE meeting_speakers SET voiceprint_id = ? WHERE id = ?`).run(patch.voiceprintId, id)
   if ('centroid' in patch) d.prepare(`UPDATE meeting_speakers SET centroid = ? WHERE id = ?`).run(toBlob(patch.centroid ?? null), id)
@@ -295,7 +390,7 @@ export function updateSpeaker(
 
 /** 合并说话人：from 的句子全部归到 into，删除 from（from 的名字在 into 没名字时继承） */
 export function mergeSpeakers(from: number, into: number): void {
-  const d = database()
+  const d = db()
   d.transaction(() => {
     const a = getSpeaker(from)
     const b = getSpeaker(into)
@@ -311,7 +406,7 @@ export function addSegment(
   meetingId: string,
   seg: { speakerId: number | null; startSample: number; endSample: number; text: string; embedding?: Float32Array | null; track?: MeetingTrack }
 ): number {
-  const info = database()
+  const info = db()
     .prepare(`INSERT INTO meeting_segments (meeting_id, speaker_id, start_sample, end_sample, text, embedding, track) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(meetingId, seg.speakerId, seg.startSample, seg.endSample, seg.text, toBlob(seg.embedding ?? null), seg.track ?? 0)
   return Number(info.lastInsertRowid)
@@ -319,11 +414,11 @@ export function addSegment(
 
 /** 逐句声纹（D-020）：会后按人数重新区分说话人用 */
 export function setSegmentEmbedding(id: number, v: Float32Array): void {
-  database().prepare(`UPDATE meeting_segments SET embedding = ? WHERE id = ?`).run(toBlob(v), id)
+  db().prepare(`UPDATE meeting_segments SET embedding = ? WHERE id = ?`).run(toBlob(v), id)
 }
 
 export function segmentEmbeddings(meetingId: string): Map<number, Float32Array> {
-  const rows = database().prepare(`SELECT id, embedding FROM meeting_segments WHERE meeting_id = ? AND embedding IS NOT NULL`).all(meetingId) as Array<{
+  const rows = db().prepare(`SELECT id, embedding FROM meeting_segments WHERE meeting_id = ? AND embedding IS NOT NULL`).all(meetingId) as Array<{
     id: number
     embedding: Buffer
   }>
@@ -331,7 +426,7 @@ export function segmentEmbeddings(meetingId: string): Map<number, Float32Array> 
 }
 
 export function setExpectedSpeakers(id: string, n: number | null, track: MeetingTrack = 0): void {
-  database()
+  db()
     .prepare(`UPDATE meetings SET ${track === 1 ? 'expected_remote' : 'expected_speakers'} = ? WHERE id = ?`)
     .run(n, id)
 }
@@ -342,12 +437,12 @@ export function expectedOf(r: Pick<MeetingRow, 'expected_speakers' | 'expected_r
 }
 
 export function setSegmentSpeaker(id: number, speakerId: number | null, locked?: boolean): void {
-  if (locked === undefined) database().prepare(`UPDATE meeting_segments SET speaker_id = ? WHERE id = ?`).run(speakerId, id)
-  else database().prepare(`UPDATE meeting_segments SET speaker_id = ?, locked = ? WHERE id = ?`).run(speakerId, locked ? 1 : 0, id)
+  if (locked === undefined) db().prepare(`UPDATE meeting_segments SET speaker_id = ? WHERE id = ?`).run(speakerId, id)
+  else db().prepare(`UPDATE meeting_segments SET speaker_id = ?, locked = ? WHERE id = ?`).run(speakerId, locked ? 1 : 0, id)
 }
 
 export function listSegments(meetingId: string): SegmentRow[] {
-  const rows = database()
+  const rows = db()
     .prepare(`SELECT id, speaker_id, track, start_sample, end_sample, text, locked FROM meeting_segments WHERE meeting_id = ? ORDER BY start_sample, id`)
     .all(meetingId) as Array<{ id: number; speaker_id: number | null; track: MeetingTrack; start_sample: number; end_sample: number; text: string; locked: number }>
   return rows.map((r) => ({
@@ -363,7 +458,7 @@ export function listSegments(meetingId: string): SegmentRow[] {
 
 /** 「说话人 N」按第一次发言的先后重新编号（名字不变；每一路各自编号） */
 export function relabelSpeakers(meetingId: string): void {
-  const d = database()
+  const d = db()
   const order = d
     .prepare(
       `SELECT s.id, s.track FROM meeting_speakers s
@@ -380,7 +475,7 @@ export function relabelSpeakers(meetingId: string): void {
 
 /** 删掉没有句子的说话人（重新归类、合并之后） */
 export function pruneSpeakers(meetingId: string): void {
-  database()
+  db()
     .prepare(`DELETE FROM meeting_speakers WHERE meeting_id = ? AND NOT EXISTS (SELECT 1 FROM meeting_segments g WHERE g.speaker_id = meeting_speakers.id)`)
     .run(meetingId)
 }
@@ -388,7 +483,7 @@ export function pruneSpeakers(meetingId: string): void {
 // —— 声纹库（D-016）——
 
 export function listVoiceprints(): Voiceprint[] {
-  return (database().prepare(`SELECT id, name, samples, created_at, updated_at FROM voiceprints ORDER BY updated_at DESC`).all() as Array<{
+  return (db().prepare(`SELECT id, name, samples, created_at, updated_at FROM voiceprints ORDER BY updated_at DESC`).all() as Array<{
     id: number
     name: string
     samples: number
@@ -398,13 +493,13 @@ export function listVoiceprints(): Voiceprint[] {
 }
 
 export function voiceprintVectors(): Array<{ id: number; name: string; samples: number; vector: Float32Array }> {
-  return (database().prepare(`SELECT id, name, samples, vector FROM voiceprints WHERE model = ?`).all(EMBED_MODEL) as Array<{ id: number; name: string; samples: number; vector: Buffer }>).map(
+  return (db().prepare(`SELECT id, name, samples, vector FROM voiceprints WHERE model = ?`).all(EMBED_MODEL) as Array<{ id: number; name: string; samples: number; vector: Buffer }>).map(
     (r) => ({ id: r.id, name: r.name, samples: r.samples, vector: fromBlob(r.vector)! })
   )
 }
 
 export function saveVoiceprint(p: { id?: number | null; name: string; vector: Float32Array; samples: number }): number {
-  const d = database()
+  const d = db()
   const now = Date.now()
   if (p.id) {
     d.prepare(`UPDATE voiceprints SET name = ?, vector = ?, samples = ?, model = ?, updated_at = ? WHERE id = ?`).run(p.name, toBlob(p.vector), p.samples, EMBED_MODEL, now, p.id)
@@ -415,7 +510,7 @@ export function saveVoiceprint(p: { id?: number | null; name: string; vector: Fl
 }
 
 export function renameVoiceprint(id: number, name: string): void {
-  const d = database()
+  const d = db()
   d.transaction(() => {
     d.prepare(`UPDATE voiceprints SET name = ?, updated_at = ? WHERE id = ?`).run(name, Date.now(), id)
     d.prepare(`UPDATE meeting_speakers SET name = ? WHERE voiceprint_id = ?`).run(name, id)
@@ -424,7 +519,7 @@ export function renameVoiceprint(id: number, name: string): void {
 
 /** 删除声纹：立即生效；已有会议里的名字保留，只是不再关联声纹 */
 export function deleteVoiceprint(id: number): void {
-  const d = database()
+  const d = db()
   d.transaction(() => {
     d.prepare(`DELETE FROM voiceprints WHERE id = ?`).run(id)
     d.prepare(`UPDATE meeting_speakers SET voiceprint_id = NULL WHERE voiceprint_id = ?`).run(id)
