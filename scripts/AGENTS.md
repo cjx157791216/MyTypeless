@@ -24,6 +24,7 @@
 - 签名：`electron-builder.yml` 的 `identity: null` 让 electron-builder 完全跳过签名，由 `sign-app.cjs` 补签：有本地证书就用证书签名（重新打包后系统授权仍有效），没有才退回 adhoc（每次打包都要重新授权）。不要删 `.vendor/signing/`，删了证书会变、所有授权失效。从 adhoc 版本换到证书签名版本时，旧授权记录无效但开关显示为开：主窗口「重置授权」按钮会清除本应用的旧记录。
 - 在线更新（D-028）按**版本号**判断新旧，不看构建号：发布前必须升级 `package.json` 的 `version`（`npm run release` 会拒绝不更大的版本）。自动安装要求新旧版本同一证书签名；应用不在「应用程序」文件夹（如直接从 DMG 运行）时 Squirrel 无法替换。开发运行不检查更新；测试用打包版 + `MT_UPDATE_URL=http://127.0.0.1:<端口>/latest` 指向本机临时服务器。
 - Windows 安装包（D-036）：electron-builder 写 exe 图标要用的 winCodeSign 工具包里有 macOS 符号链接，没开开发者模式的普通用户解压失败、打包中止——`dist.cjs` 的 `prepareWinCodeSign` 预先解压（跳过 darwin 目录）；Windows 不传 `buildVersion`（文件版本每段最大 65535，放不下 YYYYMMDD 构建号）；构建号固定按北京时间算（`dist.cjs` 的 `BUILD_UTC_OFFSET_HOURS`），否则 GitHub 的 Windows 机器（UTC）打出的包比 Mac 包早 8 小时。文件名带操作系统（`-win-x64`），改名时同步 `publish.cjs` 的解析与 `release-windows.yml`。
+- 构建号分钟尾 0 必须避开（`dist.cjs` 已自动把尾 0 分钟 +1）：electron-builder 把 macOS 的 `buildVersion` 当数字写进 Info.plist，`20261113.2250` 会写成 `20261113.225`，发布脚本读 plist 校验构建号即失败（0.3.11 首次发布实测）。
 - 安装版与开发版共用 `%APPDATA%\MyTypeless` 和单实例锁：开发版开着时安装版（包括更新后自动重新打开的那次）一启动就把窗口交给开发版并退出，测安装版先关开发版或用 `--user-data-dir`。
 - `workflow_dispatch` 的工作流必须在默认分支上才能被触发：改 `release-windows.yml` 合并前无法从 `npm run release` 触发。
 - Windows 上不能直接 `npm install`：better-sqlite3 没有 Node 24 的 Windows 预编译包（现场编译要 VS 的 ClangCL 组件），Electron 33 的安装脚本在 Node 24 下只解压出第一个文件却报告成功；`setup-win.cjs` 跳过安装脚本、按 Electron ABI 下载预编译包、解压不完整时用系统 tar。CI 的 Windows job 用 `npm ci --ignore-scripts` 即可。
